@@ -27,6 +27,22 @@ ae882ad6-e057-4419-b3f7-1ffdbcfb6593
 2569:
 b59f2279-ced4-4c41-8452-e1c2cf60b2f1
 
+### API Endpoint
+
+```text
+https://opend.data.go.th/get-ckan/datastore_search
+```
+
+The extraction script uses the `api-key` request header and reads the token
+from `DATA_GO_TH_TOKEN` in `.env`. To fetch only the 2569 resource, run:
+
+```powershell
+& "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe" `
+        src/extract/extract_disease.py `
+        --year 2569 `
+        --limit 1000
+```
+
 ### Available Records
 
 - 2568: 234,081 records

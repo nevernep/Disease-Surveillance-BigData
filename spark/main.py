@@ -2,6 +2,9 @@ import argparse
 import sys
 from pathlib import Path
 
+from pyspark.sql import functions as F
+
+
 from spark.cleaners import (
     canonicalize_disease_data,
     clean_disease_data,
@@ -24,15 +27,21 @@ from spark.readers import (
     read_population_files,
 )
 from spark.standardizers import standardize_disease_data
+from spark.warehouse import build_warehouse_tables
 from spark.writers import (
     write_parquet_directory,
     write_error_log,
     write_quality_report,
     write_single_file,
+    write_warehouse_tables,
 )
 
 
-def run_pipeline(project_root: Path, fail_on_dq: bool) -> int:
+def run_pipeline(
+    project_root: Path,
+    fail_on_dq: bool,
+    allow_missing_population: bool = False,
+) -> int:
     paths = ProjectPaths(root=project_root)
     settings = Settings.from_env(project_root)
     spark = create_spark_session(settings)
@@ -64,13 +73,24 @@ def run_pipeline(project_root: Path, fail_on_dq: bool) -> int:
         write_parquet_directory(standardized, paths.standardized_dir)
 
         print("[6/9] เตรียมข้อมูลประชากร")
-        raw_population = read_population_files(
-            spark, paths.raw_reference_dir
-        )
-        population = canonicalize_population_data(
-            raw_population, settings
-        )
-        population = fill_missing_years(population, standardized)
+        try:
+            raw_population = read_population_files(
+                spark, paths.raw_reference_dir
+            )
+            population = canonicalize_population_data(
+                raw_population, settings
+            )
+            population = fill_missing_years(population, standardized)
+        except FileNotFoundError:
+            if not allow_missing_population:
+                raise
+            print("      ไม่พบ Population: ทำ Dashboard จำนวนผู้ป่วยเท่านั้น")
+            population = (
+                standardized
+                .select("year_be", "district_name")
+                .limit(0)
+                .withColumn("population", F.lit(None).cast("double"))
+            )
         population.cache()
 
         print("[7/9] สร้าง Gold Layer และคำนวณ Incidence Rate")
@@ -80,7 +100,11 @@ def run_pipeline(project_root: Path, fail_on_dq: bool) -> int:
         write_single_file(curated, paths.gold_csv, "csv")
         write_parquet_directory(curated, paths.gold_parquet)
 
-        print("[8/9] ตรวจสอบคุณภาพข้อมูล")
+        print("[8/10] สร้าง Data Warehouse Star Schema")
+        warehouse_tables = build_warehouse_tables(curated)
+        write_warehouse_tables(warehouse_tables, paths)
+
+        print("[9/10] ตรวจสอบคุณภาพข้อมูล")
         report, has_failure = run_quality_checks(
             spark=spark,
             raw=raw_disease,
@@ -96,8 +120,9 @@ def run_pipeline(project_root: Path, fail_on_dq: bool) -> int:
         write_quality_report(report, paths.quality_csv)
         write_error_log(report, paths.error_log_csv)
 
-        print("[9/9] เสร็จสิ้น")
+        print("[10/10] เสร็จสิ้น")
         print(f"      Gold CSV      : {paths.gold_csv}")
+        print(f"      Warehouse     : {paths.warehouse_dir}")
         print(f"      Gold Parquet  : {paths.gold_parquet}")
         print(f"      Quality Report: {paths.quality_csv}")
 
@@ -130,6 +155,15 @@ def parse_arguments() -> argparse.Namespace:
         help="คืนค่า exit code 1 เมื่อ Data Quality ไม่ผ่าน",
     )
 
+    parser.add_argument(
+        "--allow-missing-population",
+        action="store_true",
+        help=(
+            "สร้าง Dashboard จำนวนผู้ป่วยแม้ยังไม่มี Population; "
+            "Incidence Rate จะเป็นค่าว่าง"
+        ),
+    )
+
     return parser.parse_args()
 
 
@@ -139,6 +173,7 @@ if __name__ == "__main__":
     exit_code = run_pipeline(
         project_root=Path(arguments.project_root).resolve(),
         fail_on_dq=arguments.fail_on_dq,
+        allow_missing_population=arguments.allow_missing_population,
     )
 
     sys.exit(exit_code)

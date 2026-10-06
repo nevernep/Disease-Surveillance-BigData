@@ -17,22 +17,50 @@ def read_disease_json(
     spark: SparkSession,
     disease_directory: Path,
 ) -> DataFrame:
-    """อ่านไฟล์ JSON ของข้อมูลผู้ป่วยทุกไฟล์ในโฟลเดอร์"""
+    """อ่านไฟล์ Disease แบบ JSON หรือ CSV จากโฟลเดอร์"""
 
-    json_files = sorted(disease_directory.glob("disease_cases_*.json"))
+    source_files = sorted(disease_directory.glob("disease_cases_*") )
 
-    if not json_files:
+    if not source_files:
         raise FileNotFoundError(
-            f"ไม่พบไฟล์ Disease JSON ใน {disease_directory}"
+            f"ไม่พบไฟล์ Disease ใน {disease_directory}"
         )
 
-    dataframe = (
-        spark.read
-        .option("multiLine", True)
-        .option("mode", "PERMISSIVE")
-        .json([str(path) for path in json_files])
-        .withColumn("_source_file", F.input_file_name())
-    )
+    json_files = []
+    csv_files = []
+    for path in source_files:
+        with path.open("r", encoding="utf-8-sig") as source:
+            first_character = source.read(1)
+        if first_character in {"[", "{"}:
+            json_files.append(str(path))
+        else:
+            csv_files.append(str(path))
+
+    dataframes = []
+    if json_files:
+        dataframes.append(
+            spark.read
+            .option("multiLine", True)
+            .option("mode", "PERMISSIVE")
+            .json(json_files)
+        )
+    if csv_files:
+        dataframes.append(
+            spark.read
+            .option("header", True)
+            .option("encoding", "UTF-8")
+            .option("mode", "PERMISSIVE")
+            .csv(csv_files)
+        )
+
+    dataframe = dataframes[0]
+    for next_dataframe in dataframes[1:]:
+        dataframe = dataframe.unionByName(
+            next_dataframe,
+            allowMissingColumns=True,
+        )
+
+    dataframe = dataframe.withColumn("_source_file", F.input_file_name())
 
     dataframe = _flatten_nested_records(dataframe)
 

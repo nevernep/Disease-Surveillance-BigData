@@ -3,6 +3,8 @@ from pathlib import Path
 
 from pyspark.sql import DataFrame
 
+from spark.config import ProjectPaths
+
 
 def remove_path(path: Path) -> None:
     """ลบไฟล์หรือโฟลเดอร์เดิมก่อนเขียนทับ"""
@@ -94,3 +96,19 @@ def write_error_log(
     """บันทึกเฉพาะรายการ DQ ที่ไม่ผ่านเพื่อใช้ติดตามแก้ไข"""
 
     write_single_file(dataframe.filter("status = 'FAIL'"), target_file, "csv")
+
+
+def write_warehouse_tables(
+    tables: dict[str, DataFrame],
+    paths: ProjectPaths,
+) -> None:
+    """Write BI-friendly star-schema tables as CSV and Parquet."""
+
+    for table_name, dataframe in tables.items():
+        table_dir = paths.warehouse_dir / table_name
+        write_single_file(
+            dataframe,
+            paths.warehouse_dir / f"{table_name}.csv",
+            "csv",
+        )
+        write_parquet_directory(dataframe, table_dir)

@@ -1,0 +1,52 @@
+Total Cases = SUM(fact_disease_cases[total_cases])
+
+Source Records = SUM(fact_disease_cases[source_records])
+
+Covered Population =
+SUMX(
+    SUMMARIZE(
+        fact_disease_cases,
+        fact_disease_cases[date_key],
+        fact_disease_cases[district_key],
+        "DistrictPopulation", MAX(fact_disease_cases[population])
+    ),
+    [DistrictPopulation]
+)
+
+Incidence Rate per 100k =
+DIVIDE([Total Cases] * 100000, [Covered Population])
+
+District Rank =
+RANKX(
+    ALLSELECTED(dim_district[district_name]),
+    [Total Cases],
+    ,
+    DESC,
+    Dense
+)
+
+Year over Year Cases % =
+VAR CurrentCases = [Total Cases]
+VAR CurrentYear = MAX(dim_date[year_be])
+VAR PreviousCases =
+    CALCULATE(
+        [Total Cases],
+        FILTER(
+            ALL(dim_date[year_be]),
+            dim_date[year_be] = CurrentYear - 1
+        )
+    )
+RETURN
+    DIVIDE(CurrentCases - PreviousCases, PreviousCases)
+
+Population Coverage Status =
+VAR MissingRows =
+    COUNTROWS(
+        FILTER(
+            fact_disease_cases,
+            ISBLANK(fact_disease_cases[population])
+                || fact_disease_cases[population] <= 0
+        )
+    )
+RETURN
+    IF(MissingRows > 0, "มีข้อมูลประชากรไม่ครบ", "ครบถ้วน")

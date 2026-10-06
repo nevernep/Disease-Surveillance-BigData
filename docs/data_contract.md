@@ -258,6 +258,30 @@ Row 1
 Row 2
 Column Header
 
+---
+
+# 12. Data Warehouse Contract
+
+Spark writes the BI-ready star schema to `data/processed/warehouse/` after
+the Gold dataset is built. Each table is available as a UTF-8 CSV file and a
+Parquet directory.
+
+| Table | Grain / key | Required columns |
+|---|---|---|
+| `dim_date` | one row per year / `date_key` | `date_key`, `year_be`, `year_ce`, `year_label` |
+| `dim_district` | one row per district / `district_key` | `district_key`, `district_name` |
+| `dim_disease` | one row per standardized disease / `disease_key` | `disease_key`, `disease_name` |
+| `fact_disease_cases` | year + district + disease | `date_key`, `district_key`, `disease_key`, `total_cases`, `population`, `incidence_rate_per_100k`, `source_records` |
+
+The fact table is an aggregate at year, district, and disease grain. The
+`population` value is repeated for each disease in a district-year and must
+not be summed across diseases in a dashboard. Use the incidence-rate measure
+or a separate district-year population aggregate for cross-disease reporting.
+
+Power BI relationships and recommended measures are documented in
+`docs/powerbi_dashboard.md`; reusable PostgreSQL semantic views are in
+`sql/analytics_views.sql`.
+
 Rows 3-5
 ข้อมูลรายแขวง
 

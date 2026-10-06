@@ -105,11 +105,11 @@ def parse_report_date(column: Column) -> Column:
 
     return F.coalesce(
         parsed_dmy,
-        F.try_to_date(
+        F.to_date(
             F.substring(text, 1, 10),
             "yyyy-MM-dd",
         ),
-        F.try_to_date(
+        F.to_date(
             F.substring(text, 1, 10),
             "yyyy/MM/dd",
         ),

@@ -31,6 +31,8 @@ def assign_case_id(dataframe: DataFrame) -> DataFrame:
     """เติม case_id ให้แถวที่ไม่มีค่า"""
 
     surrogate = build_surrogate_key(BUSINESS_KEY_COLUMNS)
+    source_case_id = F.trim(F.col("case_id"))
+    scoped_case_id = F.concat_ws(":", F.col("year_be"), source_case_id)
 
     return dataframe.withColumn(
         "case_id",
@@ -38,7 +40,7 @@ def assign_case_id(dataframe: DataFrame) -> DataFrame:
             F.col("case_id").isNull()
             | (F.length(F.trim(F.col("case_id"))) == 0),
             surrogate,
-        ).otherwise(F.trim(F.col("case_id"))),
+        ).otherwise(scoped_case_id),
     )
 
 

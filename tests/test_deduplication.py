@@ -28,3 +28,30 @@ def test_deduplicate_by_case_id(spark):
     assert result.count() == 2
     assert removed == 1
     assert count_duplicate_keys(result, ["case_id"]) == 0
+
+
+def test_case_id_is_scoped_to_year(spark):
+    schema = StructType([
+        StructField("case_id", StringType(), True),
+        StructField("year_be", IntegerType(), True),
+        StructField("report_date", StringType(), True),
+        StructField("disease_name_raw", StringType(), True),
+        StructField("district_name_raw", StringType(), True),
+        StructField("case_count", DoubleType(), True),
+        StructField("sex", StringType(), True),
+        StructField("age", DoubleType(), True),
+        StructField("source_file", StringType(), True),
+    ])
+
+    data = spark.createDataFrame(
+        [
+            ("1", 2568, None, "ไข้เลือดออก", "บางกะปิ", 1.0, "M", 30.0, "f1"),
+            ("1", 2569, None, "ไข้เลือดออก", "บางกะปิ", 1.0, "M", 30.0, "f2"),
+        ],
+        schema=schema,
+    )
+
+    result, removed = deduplicate_cases(data)
+
+    assert result.count() == 2
+    assert removed == 0

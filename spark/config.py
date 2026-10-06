@@ -53,6 +53,10 @@ class ProjectPaths:
         return self.gold_dir / "curated_disease_data"
 
     @property
+    def warehouse_dir(self) -> Path:
+        return self.processed_dir / "warehouse"
+
+    @property
     def quarantine_dir(self) -> Path:
         return self.processed_dir / "quarantine" / "disease_rejected"
 

@@ -1,0 +1,39 @@
+{
+  "name": "Disease Surveillance",
+  "dataColors": [
+    "#006D77",
+    "#E29578",
+    "#83C5BE",
+    "#FFDDD2",
+    "#264653",
+    "#F4A261"
+  ],
+  "background": "#F8FAF9",
+  "foreground": "#173B3F",
+  "tableAccent": "#006D77",
+  "visualStyles": {
+    "*": {
+      "*": {
+        "title": [
+          {
+            "fontFamily": "Aptos Display",
+            "fontSize": 12,
+            "color": { "solid": { "color": "#173B3F" } }
+          }
+        ],
+        "background": [
+          {
+            "color": { "solid": { "color": "#FFFFFF" } },
+            "transparency": 0
+          }
+        ],
+        "border": [
+          {
+            "show": true,
+            "color": { "solid": { "color": "#D8E5E3" } }
+          }
+        ]
+      }
+    }
+  }
+}

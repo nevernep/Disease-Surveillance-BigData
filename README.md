@@ -4,703 +4,308 @@
 
 **Big Data Analytics for Communicable Disease Surveillance in Bangkok**
 
-โปรเจกต์นี้จัดทำขึ้นเพื่อออกแบบและพัฒนา Big Data Pipeline สำหรับรวบรวม จัดเก็บ ประมวลผล และวิเคราะห์ข้อมูลผู้ป่วยโรคติดต่อในกรุงเทพมหานคร โดยใช้ข้อมูลจากแหล่งข้อมูลภาครัฐและข้อมูลประชากรประกอบการวิเคราะห์
+โปรเจกต์นี้ออกแบบและพัฒนา Big Data Pipeline สำหรับรวบรวม จัดเก็บ ประมวลผล และวิเคราะห์ข้อมูลผู้ป่วยโรคติดต่อในกรุงเทพมหานคร จากข้อมูลเปิดภาครัฐ (Data.go.th) ประกอบกับข้อมูลประชากร
 
-ระบบออกแบบให้ครอบคลุมกระบวนการตั้งแต่ **Data Ingestion → Data Lake → Workflow Orchestration → Distributed Processing → Data Warehouse → Dashboard**
+```text
+Data.go.th API → Raw JSON → Data Lake (S3) → Airflow → Spark (Clean/DQ) → PostgreSQL Warehouse → Power BI
+```
 
 ---
 
-## Project Objectives
-
-วัตถุประสงค์ของโครงการ ได้แก่
+## วัตถุประสงค์
 
 1. รวบรวมข้อมูลผู้ป่วยโรคติดต่อจากแหล่งข้อมูลภาครัฐ
-2. พัฒนา Data Ingestion สำหรับข้อมูลจาก REST API และไฟล์ Excel
-3. จัดเก็บข้อมูลต้นฉบับใน Raw Data Layer / Data Lake
-4. ใช้ Apache Airflow ควบคุม Data Pipeline
-5. ใช้ Apache Spark สำหรับประมวลผลและตรวจสอบคุณภาพข้อมูล
-6. จัดเก็บข้อมูลที่ผ่านการประมวลผลใน Data Warehouse
-7. วิเคราะห์แนวโน้มโรคตามเวลา พื้นที่ และลักษณะประชากร
-8. นำเสนอผลผ่าน Dashboard
+2. พัฒนา Data Ingestion จาก REST API และไฟล์ Excel/CSV
+3. จัดเก็บข้อมูลต้นฉบับแบบไม่แก้ไขใน Raw Zone ของ Data Lake
+4. ใช้ Apache Airflow ควบคุมและติดตาม Pipeline
+5. ใช้ Apache Spark ทำความสะอาด Standardize และตรวจคุณภาพข้อมูล
+6. จัดเก็บข้อมูลที่ประมวลผลแล้วใน Data Warehouse (PostgreSQL, Star Schema)
+7. วิเคราะห์แนวโน้มโรคตามเวลา พื้นที่ อายุ และเพศ
+8. นำเสนอผลผ่าน Dashboard (Power BI)
 
 ---
 
-## Disease Scope
+## สถาปัตยกรรม
 
-ข้อมูล Disease Surveillance ปัจจุบันประกอบด้วยโรคสำคัญ เช่น
+```text
+┌──────────────────────┐
+│ Data.go.th REST API  │  src/extract/extract_disease.py (token ใน .env)
+└──────────┬───────────┘
+           │ Raw JSON  data/raw/disease/
+           ▼
+┌──────────────────────────────────────────────────────────────┐
+│ Apache Airflow (Docker, LocalExecutor)                        │
+│                                                               │
+│  DAG disease_raw_to_lake                                      │
+│   ensure bucket → land_disease_{ปี} (ตรวจ 16 fields, SHA-256)  │
+│                 → land_population_{ปี} (ข้ามได้: cases-only)   │
+│                 → trigger spark_processing                    │
+│                                                               │
+│  DAG spark_processing                                         │
+│   run_spark_pipeline → load_warehouse                         │
+└──────────┬──────────────────────────────┬────────────────────┘
+           ▼                              ▼
+┌──────────────────────┐       ┌───────────────────────────────┐
+│ Data Lake (SeaweedFS,│       │ Apache Spark 3.5 (PySpark)    │
+│ S3-compatible)       │◄─────►│ อ่าน raw/ ผ่าน S3A             │
+│  raw/       ต้นฉบับ   │       │ canonical → quarantine/clean  │
+│  processed/ Parquet  │       │ → dedup → standardize         │
+└──────────────────────┘       │ → gold + star schema + DQ     │
+                               └──────────────┬────────────────┘
+                                              ▼
+                               ┌───────────────────────────────┐
+                               │ PostgreSQL Warehouse (mart)   │
+                               │ dim_* + fact_disease_cases    │
+                               │ + fact_population + views     │
+                               └──────────────┬────────────────┘
+                                              ▼
+                                         Power BI
+```
 
-- ไข้หวัดใหญ่
-- ไข้เลือดออก
-- อุจจาระร่วง / โรคอุจจาระร่วงเฉียบพลัน
-- โรคปอดบวม
-- COVID-19
-
-> รายชื่อและค่าของโรคจะอ้างอิงจากข้อมูลต้นทาง โดยการ Standardize ชื่อโรคจะดำเนินการใน Processing Layer
+| Service | หน้าที่ | Port (เครื่อง local) |
+|---|---|---|
+| `airflow` | Web UI, scheduler และรัน Spark | `8080` |
+| `object-store` | SeaweedFS: S3 API และ filer | `8333`, `8888` |
+| `postgres` | metadata ของ Airflow เท่านั้น | — |
+| `warehouse-db` | Data Warehouse (schema `mart`) | `127.0.0.1:5433` |
 
 ---
 
-# Data Sources
+## เริ่มใช้งาน (Docker)
 
-## 1. Disease Surveillance Data
+ต้องมี Docker Desktop และควรให้ RAM แก่ Docker อย่างน้อย 4 GB (ถ้าจะใช้ข้อมูลเต็ม แนะนำ 6–8 GB)
 
-**Source:** Data.go.th Data API  
-**Format:** JSON / REST API
+```powershell
+# 1) ตั้งค่า: คัดลอกค่าตั้งต้นแล้วใส่ DATA_GO_TH_TOKEN (ห้าม commit .env)
+Copy-Item .env.example .env
 
-ข้อมูลที่ใช้งาน:
+# 2) ดึงข้อมูลตัวอย่างจาก API (ปีละ 100 records)
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+python src\extract\extract_disease.py
 
-| ปี พ.ศ. | ค.ศ. | Available Records |
+# 3) เปิดระบบ
+docker compose up -d --build
+
+# 4) รัน pipeline ทั้งเส้น (raw → lake → spark → warehouse)
+docker compose exec airflow airflow dags unpause disease_raw_to_lake
+docker compose exec airflow airflow dags unpause spark_processing
+docker compose exec airflow airflow dags trigger disease_raw_to_lake
+```
+
+- Airflow UI: http://localhost:8080 (user `airflow` / `airflow-local-only`)
+- SeaweedFS filer: http://localhost:8888 (bucket `disease-surveillance`)
+- Warehouse: `localhost:5433` database `surveillance_dw` (user `dw_user` / `warehouse-local-only`)
+
+รันเฉพาะ Spark + โหลด warehouse ใหม่ โดยไม่ land raw ซ้ำ:
+
+```powershell
+docker compose exec airflow airflow dags trigger spark_processing
+```
+
+> ค่า credentials ใน Compose ใช้สำหรับเครื่อง local เท่านั้น รายละเอียดการใช้งานและการแก้ปัญหาอยู่ที่ [docs/data_lake_airflow.md](docs/data_lake_airflow.md)
+
+### ตัวแปรสำคัญใน `.env`
+
+| ตัวแปร | ค่าตั้งต้น | ความหมาย |
+|---|---|---|
+| `DATA_GO_TH_TOKEN` | — | token ของ Data.go.th ใช้เฉพาะสคริปต์ extract |
+| `REQUIRE_POPULATION` | `false` | `false` = **cases-only mode** (ไม่มีข้อมูลประชากรก็รันได้ incidence จะว่าง), `true` = บังคับต้องมีข้อมูลประชากร 50 เขต |
+| `DATA_LAKE_URI` | `s3a://disease-surveillance` | Spark อ่าน/เขียนผ่าน Data Lake; ตั้งเป็นค่าว่างเพื่อใช้ไฟล์ในเครื่อง |
+| `SPARK_MASTER` | `local[2]` | จำนวน core ของ Spark (จำกัดไว้เพื่อให้ Airflow UI ไม่ล่ม) |
+| `WAREHOUSE_DB_*` | ดู `.env.example` | การเชื่อมต่อ PostgreSQL Warehouse |
+
+---
+
+## โครงสร้างโปรเจกต์
+
+```text
+Disease-Surveillance-BigData/
+├── airflow/
+│   ├── Dockerfile                 Airflow 2.10 + Java 17 + PySpark + S3A jars
+│   └── dags/
+│       ├── disease_raw_to_lake.py ตรวจ raw ตาม data contract แล้ว land ลง S3
+│       └── spark_processing.py    รัน Spark แล้วโหลด warehouse
+├── spark/
+│   ├── main.py                    entry point ของ pipeline (10 ขั้น)
+│   ├── config.py                  path (local / s3a), SparkSession, S3A config
+│   ├── readers.py                 อ่าน raw จากเครื่องหรือ Data Lake
+│   ├── cleaners.py                canonical schema, กฎ clean/quarantine ชุดเดียว
+│   ├── deduplication.py           case_id + ลบข้อมูลซ้ำ
+│   ├── standardizers.py           ชื่อเขต ชื่อโรค เพศ กลุ่มอายุ
+│   ├── population.py              เตรียมข้อมูลประชากร
+│   ├── curated.py                 gold รายปี + incidence rate
+│   ├── warehouse.py               star schema รายเดือน
+│   ├── data_quality.py            กฎ Data Quality + กระทบยอด warehouse
+│   ├── writers.py                 เขียน Parquet/CSV
+│   ├── load_warehouse.py          โหลด PostgreSQL ใน transaction เดียว
+│   ├── prepare_population_reference.py   เตรียม CSV ประชากร 50 เขตจากแหล่งทางการ
+│   └── validate_population_reference.py  ตรวจ CSV ประชากรที่เตรียมแล้ว
+├── sql/
+│   ├── ddl.sql                    schema mart (PK/FK/CHECK)
+│   └── analytics_views.sql        semantic views สำหรับ BI
+├── src/extract/                   ดึงข้อมูลจาก API และ profiling
+├── tests/                         unit tests (pytest)
+├── powerbi/                       DAX measures, layout, theme
+├── docs/                          data sources, data contract, lake/airflow, Power BI
+├── data/                          (ไม่ commit ยกเว้น data/raw/disease/reference/)
+│   ├── raw/disease/               disease_cases_{ปี}_sample.json
+│   │   └── reference/             population_summary_{ปี}.csv
+│   ├── raw/reference/             Excel ประชากรเขตบึงกุ่ม (ต้นฉบับ)
+│   └── processed/                 CSV สำหรับ BI และรายงาน DQ
+├── docker-compose.yml
+├── requirements.txt
+└── pytest.ini
+```
+
+### Data Lake layout
+
+```text
+s3://disease-surveillance/
+├── raw/
+│   ├── disease/year={ปี}/disease_cases_{ปี}_sample.json  (+ _metadata/*.manifest.json)
+│   └── population/year={ปี}/population_summary_{ปี}.csv
+└── processed/
+    ├── clean/  quarantine/  standardized/
+    ├── gold/disease_with_population/curated_disease_data/
+    ├── warehouse/{dim_*, fact_disease_cases, fact_population}/
+    └── quality/data_quality_report/
+```
+
+---
+
+## แหล่งข้อมูล
+
+### 1. Disease Surveillance Data — Data.go.th Data API (JSON)
+
+| ปี พ.ศ. | ค.ศ. | Records ทั้งหมด |
 |---|---:|---:|
 | 2568 | 2025 | 234,081 |
 | 2569 | 2026 | 193,866 |
 | **รวม** | | **427,947** |
 
-ใน Development Phase ใช้ตัวอย่างเพียง:
+ช่วงพัฒนาใช้ตัวอย่างปีละ 100 records (`offset=0`) ข้อมูลมี 16 fields เช่น `ชื่อกลุ่มโรค`, `อายุ (เต็ม) ปี`, `เพศ`, `จังหวัด`, `อำเภอ/เขต`, `ตำบล/แขวง`, `วันที่เริ่มป่วย` ดูทั้งหมดที่ [docs/data_sources.md](docs/data_sources.md)
 
-```text
-2568 → 100 records
-2569 → 100 records
-```
+โรคในข้อมูล (หลัง Standardize): ไข้หวัดใหญ่, ไข้เลือดออก, อุจจาระร่วงเฉียบพลัน, ปอดบวม, โควิด-19
 
-เพื่อทดสอบ Data Pipeline โดยไม่ส่งคำขอไปยัง API มากเกินความจำเป็น
+### 2. Population Reference
 
-### Disease Fields
-
-ข้อมูลประกอบด้วย 16 fields:
-
-```text
-_id
-ชื่อกลุ่มโรค
-อายุ (เต็ม) ปี
-อายุ (เต็ม) เดือน
-อาย (เต็ม) วัน
-เพศ
-สถานภาพสมรส
-สัญชาติ
-อาชีพ
-จังหวัด
-อำเภอ/เขต
-ตำบล/แขวง
-วันที่เริ่มป่วย
-สภาพผู้ป่วย
-ประเภทผู้ป่วย
-สถานที่รักษา
-```
-
----
-
-## 2. Population Reference Data
-
-ข้อมูลประชากรและครัวเรือนของสำนักงานเขตบึงกุ่ม กรุงเทพมหานคร
-
-**Format:** Microsoft Excel (`.xlsx`)
-
-ปีที่มีข้อมูล:
-
-```text
-2568
-2569
-```
-
-พื้นที่ประกอบด้วย 3 แขวง:
-
-```text
-คลองกุ่ม
-นวมินทร์
-นวลจันทร์
-```
-
-### Population Fields
-
-```text
-แขวง
-จำนวนครัวเรือน
-ประชากรชาย
-ประชากรหญิง
-ประชากรรวม
-```
-
-> Population Dataset ปัจจุบันใช้เป็น Reference / Validation และสำหรับทดลอง Pipeline เท่านั้น เนื่องจากครอบคลุมเฉพาะเขตบึงกุ่ม ไม่ใช่ทั้งกรุงเทพมหานคร
-
----
-
-# System Architecture
-
-```text
-+---------------------------+
-|       Data Sources        |
-|                           |
-| - Data.go.th API          |
-| - Population Excel        |
-+-------------+-------------+
-              |
-              v
-+---------------------------+
-|     Python Ingestion      |
-|                           |
-| requests / pandas         |
-+-------------+-------------+
-              |
-              v
-+---------------------------+
-|        Apache Airflow     |
-|     Workflow Scheduling   |
-+-------------+-------------+
-              |
-              v
-+---------------------------+
-|          Data Lake        |
-|       MinIO / HDFS        |
-|                           |
-|          Raw Zone         |
-+-------------+-------------+
-              |
-              v
-+---------------------------+
-|        Apache Spark       |
-|                           |
-| Cleaning                  |
-| Standardization           |
-| Data Quality              |
-| Transformation            |
-+-------------+-------------+
-              |
-              v
-+---------------------------+
-|       Data Warehouse      |
-|         PostgreSQL        |
-+-------------+-------------+
-              |
-              v
-+---------------------------+
-|          Dashboard        |
-|       Power BI / BI       |
-+---------------------------+
-```
-
----
-
-# Team Responsibilities
-
-โปรเจกต์แบ่งการทำงานออกเป็น 4 ส่วนหลัก
-
-## PART 1 — Data Sources & Data Ingestion
-
-รับผิดชอบ:
-
-- ค้นหาและประเมิน Data Sources
-- เชื่อมต่อ REST API
-- API Authentication
-- Data Extraction
-- Ethical API Usage
-- Raw Data Storage
-- Raw Data Profiling
-- Data Source Documentation
-- Data Contract
-
-Output:
-
-```text
-Raw JSON
-Raw Excel
-Data Source Documentation
-Data Contract
-```
-
----
-
-## PART 2 — Data Lake & Apache Airflow
-
-รับผิดชอบ:
-
-- Data Lake
-- MinIO / HDFS
-- Apache Airflow
-- DAG
-- Scheduling
-- Pipeline Logging
-- Retry / Failure Handling
-- Raw Zone Management
-
-Input:
-
-```text
-Raw JSON
-Raw Excel
-```
-
-Output:
-
-```text
-Data Lake Raw Zone
-```
-
----
-
-## PART 3 — Apache Spark & Data Quality
-
-รับผิดชอบ:
-
-- Apache Spark / PySpark
-- Schema Validation
-- Data Cleaning
-- Missing Value Handling
-- Duplicate Handling
-- Type Conversion
-- Date Parsing
-- Disease Name Standardization
-- Age Processing
-- Geographic Standardization
-- Population Processing
-- Data Quality Validation
-
-Output:
-
-```text
-Clean Dataset
-Standardized Dataset
-Curated Dataset
-```
-
----
-
-## PART 4 — Data Warehouse & Dashboard
-
-รับผิดชอบ:
-
-- PostgreSQL
-- Data Warehouse
-- Dimensional Modeling
-- SQL Analytics
-- Dashboard
-- Visualization
-
-ตัวอย่างการวิเคราะห์:
-
-- จำนวนผู้ป่วยแยกตามโรค
-- แนวโน้มผู้ป่วยตามเวลา
-- จำนวนผู้ป่วยแยกตามเขต
-- จำนวนผู้ป่วยแยกตามแขวง
-- การกระจายตามเพศ
-- การกระจายตามช่วงอายุ
-- การเปรียบเทียบโรค
-- Incidence Rate เมื่อมี Population Coverage ที่เหมาะสม
-
----
-
-# Project Structure
-
-```text
-Disease-Surveillance-BigData/
-│
-├── README.md
-├── requirements.txt
-├── .env
-├── .gitignore
-│
-├── data/
-│   ├── raw/
-│   │   ├── disease/
-│   │   │   ├── disease_cases_2568_sample.json
-│   │   │   └── disease_cases_2569_sample.json
-│   │   │
-│   │   ├── population/
-│   │   │
-│   │   └── reference/
-│   │       ├── ประชากรและครัวเรือน_2568.xlsx
-│   │       └── ประชากรและครัวเรือน_2569.xlsx
-│   │
-│   └── processed/
-│
-├── src/
-│   └── extract/
-│       ├── test_disease_api.py
-│       ├── extract_disease.py
-│       ├── profile_disease.py
-│       └── profile_population.py
-│
-├── docs/
-│   ├── data_sources.md
-│   ├── data_contract.md
-│   └── data_dictionary/
-│
-├── airflow/
-│
-├── spark/
-│
-└── dashboard/
-```
-
----
-
-# Development Environment
-
-## Requirements
-
-แนะนำ:
-
-```text
-Python 3.11+
-pip
-Git
-```
-
-Python packages หลัก:
-
-```text
-requests
-pandas
-openpyxl
-python-dotenv
-```
-
----
-
-# Installation
-
-## 1. Clone Repository
-
-```bash
-git clone <repository-url>
-cd Disease-Surveillance-BigData
-```
-
----
-
-## 2. Create Virtual Environment
-
-Windows:
+- **Excel เขตบึงกุ่ม** (3 แขวง ปี 2568–2569) ใช้เป็น reference และตรวจการอ่านไฟล์เท่านั้น เพราะไม่ครอบคลุมทั้งกรุงเทพฯ
+- **Population 50 เขต** (`population_summary_{ปี}.csv`: `ปี,เขต,ประชากรรวม`) จำเป็นต่อการคำนวณ incidence rate **ยังไม่มีในโปรเจกต์** ต้องเตรียมจากแหล่งทางการด้วย:
 
 ```powershell
-python -m venv .venv
+python -m spark.prepare_population_reference --project-root . `
+  --source-2568 "<ไฟล์หรือ URL ทางการ ปี 2568>" `
+  --source-2569 "<ไฟล์หรือ URL ทางการ ปี 2569>"
+python -m spark.validate_population_reference --project-root .
 ```
 
-Activate:
-
-```powershell
-.\.venv\Scripts\Activate.ps1
-```
-
-เมื่อสำเร็จควรเห็น:
-
-```text
-(.venv)
-```
-
-ด้านหน้า Terminal
+สคริปต์ไม่สร้างตัวเลขขึ้นเอง และจะไม่เขียนทับไฟล์เดิมถ้าไม่ระบุ `--overwrite` เมื่อมีไฟล์แล้วให้ตั้ง `REQUIRE_POPULATION=true`
 
 ---
 
-## 3. Install Dependencies
+## Data Warehouse (Star Schema)
 
-```powershell
-pip install -r requirements.txt
-```
-
-ตรวจสอบ:
-
-```powershell
-pip list
-```
-
----
-
-# Environment Variables
-
-โปรเจกต์ใช้ Data.go.th API Token สำหรับ Authentication
-
-สร้างไฟล์:
-
-```text
-.env
-```
-
-ที่ Root ของ Project
-
-แล้วกำหนด:
-
-```env
-DATA_GO_TH_TOKEN=YOUR_API_TOKEN
-```
-
-> ห้าม Commit `.env` หรือ API Token ขึ้น Git Repository
-
----
-
-# Git Ignore
-
-ตัวอย่าง `.gitignore`:
-
-```gitignore
-# Virtual Environment
-.venv/
-
-# Secrets
-.env
-
-# Python
-__pycache__/
-*.pyc
-
-# Raw Data
-data/raw/
-```
-
-Raw Data สามารถดาวน์โหลดหรือสร้างใหม่จาก Data Source ได้ จึงไม่จำเป็นต้องเก็บไฟล์ขนาดใหญ่ใน Git Repository
-
----
-
-# Running Data Ingestion
-
-## Test API
-
-ใช้ตรวจสอบ API Authentication และ Schema:
-
-```powershell
-python src\extract\test_disease_api.py
-```
-
----
-
-## Extract Disease Sample
-
-```powershell
-python src\extract\extract_disease.py
-```
-
-Development Configuration ปัจจุบัน:
-
-```text
-100 records / year
-```
-
-ผลลัพธ์:
-
-```text
-data/raw/disease/disease_cases_2568_sample.json
-data/raw/disease/disease_cases_2569_sample.json
-```
-
----
-
-# Data Profiling
-
-## Disease Profiling
-
-```powershell
-python src\extract\profile_disease.py
-```
-
-ตรวจสอบเบื้องต้น เช่น
-
-```text
-Rows
-Columns
-Missing Values
-Duplicate Rows
-Disease Distribution
-Gender Distribution
-Districts
-Subdistricts
-Date Range
-```
-
-> Sample Profiling ไม่ใช้เป็นตัวแทนสำหรับการสรุปสถิติของ Full Dataset
-
----
-
-## Population Profiling
-
-```powershell
-python src\extract\profile_population.py
-```
-
-ใช้ตรวจสอบ:
-
-```text
-Excel Structure
-Columns
-Missing Values
-Duplicate Rows
-Subdistrict Records
-Households
-Male Population
-Female Population
-Total Population
-```
-
----
-
-# Raw Data Policy
-
-Raw Data ต้องรักษาข้อมูลตาม Source
-
-ห้ามแก้ไข Raw Dataset โดยตรง เช่น
-
-```text
-Rename Column
-Remove Missing Value
-Delete Duplicate
-Standardize Disease
-Convert Date
-Create Age Group
-Aggregate Records
-```
-
-การดำเนินการดังกล่าวต้องทำใน Processing Layer โดย Apache Spark
-
----
-
-# Data Quality Notes
-
-## Disease Name
-
-พบความแตกต่างของชื่อโรคระหว่างปี เช่น
-
-```text
-2568:
-อุจจาระร่วง
-
-2569:
-โรคอุจจาระร่วงเฉียบพลัน
-```
-
-จึงต้องมี Disease Name Standardization ใน Spark
-
----
-
-## Sample Bias
-
-ข้อมูล Development Sample ใช้ records จากจุดเริ่มต้นของ Dataset:
-
-```text
-offset = 0
-limit = 100
-```
-
-ดังนั้นข้อมูลดังกล่าว:
-
-- ไม่ใช่ Random Sample
-- ไม่ใช่ Stratified Sample
-- ไม่ควรใช้สรุป Disease Distribution
-- ใช้สำหรับ Pipeline Development และ Testing เท่านั้น
-
----
-
-## Population Coverage
-
-Population Dataset ปัจจุบันครอบคลุมเฉพาะ:
-
-```text
-กรุงเทพมหานคร
-└── เขตบึงกุ่ม
-    ├── คลองกุ่ม
-    ├── นวมินทร์
-    └── นวลจันทร์
-```
-
-ดังนั้นไม่ควรนำไปคำนวณ Incidence Rate ของทั้งกรุงเทพมหานคร
-
----
-
-# Ethical Data Ingestion
-
-โปรเจกต์ให้ความสำคัญกับการใช้งาน Open Data และ API อย่างเหมาะสม
-
-Development Phase ใช้แนวทาง:
-
-1. ดึงข้อมูลเฉพาะเท่าที่จำเป็น
-2. ใช้ `limit` จำกัดจำนวน records
-3. หลีกเลี่ยงการเรียก API ซ้ำโดยไม่จำเป็น
-4. ใช้ข้อมูล Raw ที่จัดเก็บไว้แล้วสำหรับการพัฒนา
-5. เคารพ Authentication และ Rate Limit ของผู้ให้บริการ
-6. ไม่พยายาม Bypass ข้อจำกัดของ API
-7. ไม่เปิดเผย API Token
-8. ไม่ Hard-code Secret ลง Source Code
-
-Full Dataset Ingestion จะดำเนินการเมื่อมีความจำเป็นต่อการประมวลผลและสอดคล้องกับข้อกำหนดของผู้ให้บริการข้อมูล
-
----
-
-# Data Contract
-
-รายละเอียด Schema, File Naming, Raw Data Rules, Data Lake Structure และข้อตกลงระหว่างแต่ละส่วนของ Pipeline อยู่ที่:
-
-```text
-docs/data_contract.md
-```
-
-รายละเอียดแหล่งข้อมูลอยู่ที่:
-
-```text
-docs/data_sources.md
-```
-
----
-
-# Data Lake and Airflow (Local Development)
-
-The local infrastructure uses Docker Compose, SeaweedFS as an S3-compatible raw data lake, and Apache Airflow with LocalExecutor. It lands the disease sample JSON files already extracted by `src/extract/extract_disease.py`; the DAG does not call the source API.
-
-1. Keep the existing `.env` (it contains the API token); add local service credentials from `.env.example` only if you want to override the development defaults. Never commit `.env`.
-2. Start the services: `docker compose up -d --build`
-3. Open Airflow at `http://localhost:8080` (default local login is `airflow` / `airflow-local-only`, unless overridden in `.env`), unpause the DAG if needed, then trigger `disease_raw_to_lake`.
-4. Browse SeaweedFS filer at `http://localhost:8888` or connect an S3 client to `http://localhost:8333` and inspect bucket `disease-surveillance`.
-
-Objects are written under `raw/disease/year=2568/` and `raw/disease/year=2569/`, with a checksum and manifest per year. Re-running the DAG is safe when the source bytes are unchanged; changed bytes at an existing key fail instead of silently replacing raw history. See `docs/data_lake_airflow.md` for details and operations.
-
-These Compose credentials are for local development only. Do not use the defaults in a shared or production environment.
-
----
-
-# Current Project Status
-
-## PART 1 — Development Phase
-
-| Task | Status |
+| ตาราง | Grain |
 |---|---|
-| Disease Data Source | Completed |
-| API Authentication | Completed |
-| API Schema Validation | Completed |
-| Disease 2568 Ingestion | Completed |
-| Disease 2569 Ingestion | Completed |
-| Ethical Sample Extraction | Completed |
-| Disease Raw Profiling | Completed |
-| Population Reference 2568 | Completed |
-| Population Reference 2569 | Completed |
-| Population Profiling | Completed |
-| Data Source Documentation | Completed |
-| Data Contract | Completed |
+| `fact_disease_cases` | เดือน × เขต × โรค × กลุ่มอายุ × เพศ (`total_cases`, `source_records`) |
+| `fact_population` | ปี × เขต (ตัวหารของ incidence) |
+| `dim_date` | เดือน (`date_key` = yyyymm, มีเดือนที่ไม่มีผู้ป่วยด้วย) |
+| `dim_district` | ครบ 50 เขตเสมอ |
+| `dim_disease`, `dim_age_group`, `dim_sex` | |
+
+Views: `vw_monthly_trend`, `vw_year_disease`, `vw_district_disease_year`, `vw_district_ranking`, `vw_demographics`, `vw_disease_overview`
+
+`load_warehouse` ทำงานใน transaction เดียว (DDL → COPY → ตรวจจำนวนแถว → views → `load_audit`) ถ้าล้มจะ rollback ข้อมูลเดิมไม่เสียหาย วิธีต่อ Power BI อยู่ที่ [docs/powerbi_dashboard.md](docs/powerbi_dashboard.md)
 
 ---
 
-# Next Phase
+## Data Quality
 
-ขั้นตอนถัดไปของ Data Pipeline:
+รายงานอยู่ที่ `data/processed/quality/data_quality_report.csv` (และ Parquet บน lake) โดย DAG จะล้มเมื่อมี rule เป็น `FAIL` ตัวอย่าง rule:
 
-```text
-PART 1
-Data Sources & Ingestion
-        |
-        | Raw JSON / Excel
-        v
-PART 2
-Apache Airflow + Data Lake
-        |
-        v
-PART 3
-Apache Spark + Data Quality
-        |
-        v
-PART 4
-Data Warehouse + Dashboard
+- จำนวนแถวไม่ว่างทุกชั้น และสัดส่วนข้อมูลที่ผ่าน clean ≥ 50%
+- ชื่อเขตอยู่ในรายชื่อ 50 เขตของกรุงเทพฯ
+- primary key ไม่ซ้ำ ทั้ง gold และ warehouse
+- สูตร incidence ถูกต้อง และแถวที่ไม่มี incidence ตรงกับแถวที่ไม่มีประชากร
+- สัดส่วนข้อมูลประชากรที่ขาด ≤ 5% (`SKIP` ในโหมด cases-only)
+- ไม่มีอายุผิดช่วงหลัง clean และปีของไฟล์ตรงกับปีของวันที่เริ่มป่วย
+- ยอดผู้ป่วยใน `fact_disease_cases` เท่ากับยอดใน standardized
+
+แถวที่ไม่ผ่าน validation ถูกเก็บใน `processed/quarantine/` พร้อมสาเหตุ (`_quarantine_reason`)
+
+---
+
+## Tests
+
+```powershell
+pip install -r requirements.txt   # ต้องมี Java 17 สำหรับ PySpark
+pytest
 ```
 
+หรือรันใน container ที่มี Spark และ Airflow ครบอยู่แล้ว (รวมเทสต์ของ DAG):
+
+```powershell
+docker compose exec airflow bash -c "cd /opt/airflow/project && python -m pytest"
+```
+
+เทสต์ของ DAG (`tests/test_dags.py`) จะถูกข้ามอัตโนมัติถ้าไม่มี Airflow ในเครื่อง
+
 ---
 
-## Important
+## ข้อควรระวังในการตีความผล
 
-โปรเจกต์นี้มีวัตถุประสงค์เพื่อการศึกษาและการวิเคราะห์ข้อมูลเชิงสถิติ/การเฝ้าระวังโรคจากข้อมูลที่เผยแพร่โดยหน่วยงานภาครัฐ
-
-ผลการวิเคราะห์จาก Development Sample ไม่ควรตีความว่าเป็นสถิติทางระบาดวิทยาของประชากรทั้งหมด
+- **Sample bias**: ข้อมูลช่วงพัฒนาคือ 100 records แรกของแต่ละปี ไม่ใช่ random sample และแต่ละไฟล์มีวันที่เริ่มป่วยเพียงวันเดียว จึงใช้ทดสอบ pipeline เท่านั้น ห้ามใช้สรุปการกระจายของโรคหรือแนวโน้ม
+- **Incidence rate** แสดงเฉพาะเมื่อมีข้อมูลประชากรครบ 50 เขต และไม่คำนวณแยกตามอายุ/เพศ (ไม่มีประชากรแยกอายุ/เพศ)
+- **ชื่อโรคต่างกันระหว่างปี** เช่น `อุจจาระร่วง` (2568) กับ `โรคอุจจาระร่วงเฉียบพลัน` (2569) ถูกรวมเป็น `อุจจาระร่วงเฉียบพลัน` ใน Spark โดยไม่แก้ Raw
 
 ---
+
+## Raw Data Policy และ Ethical Data Ingestion
+
+Raw Data ต้องคงค่าตามต้นทาง ห้ามเปลี่ยนชื่อคอลัมน์ ลบ missing/duplicate, standardize, แปลงวันที่ หรือ aggregate ใน Raw Layer การแปลงทั้งหมดทำใน Spark DAG ตรวจ checksum และจะไม่เขียนทับ object เดิมที่เนื้อหาเปลี่ยน (ต้องใช้ชื่อไฟล์ใหม่)
+
+การใช้ API:
+
+1. ดึงเฉพาะเท่าที่จำเป็น ใช้ `limit` และไม่เรียกซ้ำเมื่อมี Raw อยู่แล้ว
+2. เคารพ Authentication และ Rate Limit ไม่พยายาม bypass
+3. เก็บ token ใน `.env` เท่านั้น ห้าม hard-code หรือ commit
+4. การดึงข้อมูลเต็มควรแบ่งหน้า หน่วงเวลาระหว่างคำขอ และ retry แบบ backoff หรือใช้ไฟล์ดาวน์โหลดทั้งชุดจากหน้า dataset
+
+---
+
+## การแบ่งงาน
+
+| Part | ขอบเขต | ผลลัพธ์หลัก |
+|---|---|---|
+| 1 — Data Sources & Ingestion | API, authentication, extraction, profiling, data contract | `src/extract/`, `docs/data_sources.md`, `docs/data_contract.md` |
+| 2 — Data Lake & Airflow | SeaweedFS, DAG, retry, logging, raw zone | `docker-compose.yml`, `airflow/` |
+| 3 — Spark & Data Quality | cleaning, standardization, dedup, DQ, gold | `spark/` |
+| 4 — Warehouse & Dashboard | PostgreSQL star schema, SQL views, Power BI | `sql/`, `spark/load_warehouse.py`, `powerbi/` |
+
+## สถานะปัจจุบัน
+
+| ส่วน | สถานะ |
+|---|---|
+| Ingestion จาก API (sample) | ✅ ใช้งานได้ |
+| Raw zone บน Data Lake + Airflow | ✅ ใช้งานได้ |
+| Spark อ่าน/เขียนผ่าน Data Lake + DQ | ✅ ใช้งานได้ |
+| PostgreSQL Warehouse + views | ✅ ใช้งานได้ |
+| Unit tests | ✅ 45 tests |
+| ข้อมูลประชากร 50 เขต (incidence rate) | ⏳ รอแหล่งข้อมูลทางการ — ปัจจุบันรันแบบ cases-only |
+| ข้อมูลเต็ม (~428k records) | ⏳ ยังไม่ได้ดึง |
+| ไฟล์รายงาน Power BI (.pbix) | ⏳ ต้องสร้างใน Power BI Desktop ตาม `powerbi/report_layout.md` |
+
+---
+
+## เอกสารเพิ่มเติม
+
+- [docs/data_sources.md](docs/data_sources.md) — แหล่งข้อมูลและผล profiling
+- [docs/data_contract.md](docs/data_contract.md) — schema และข้อตกลงระหว่างแต่ละ Part
+- [docs/data_lake_airflow.md](docs/data_lake_airflow.md) — การใช้งาน Data Lake/Airflow/Spark และการแก้ปัญหา
+- [docs/powerbi_dashboard.md](docs/powerbi_dashboard.md) — การเชื่อมต่อ Power BI, model และ measures
+
+---
+
+โปรเจกต์นี้มีวัตถุประสงค์เพื่อการศึกษาและการวิเคราะห์ข้อมูลเฝ้าระวังโรคจากข้อมูลที่หน่วยงานภาครัฐเผยแพร่ ผลจาก Development Sample ไม่ควรตีความว่าเป็นสถิติทางระบาดวิทยาของประชากรทั้งหมด

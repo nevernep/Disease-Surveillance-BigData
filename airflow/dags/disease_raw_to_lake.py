@@ -67,19 +67,28 @@ def ensure_bucket():
         client.create_bucket(Bucket=bucket)
 
 
+def _validate_disease(payload: bytes, source_name: str) -> list:
+    """Check the raw JSON against the 16-field data contract; return the records."""
+    try:
+        records = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError(f"{source_name}: invalid UTF-8 JSON: {error}") from error
+    if not isinstance(records, list) or not records:
+        raise ValueError(f"{source_name}: expected a non-empty JSON array of records")
+    if set(records[0]) != EXPECTED_FIELDS:
+        raise ValueError(f"{source_name}: source fields do not match the 16-field data contract")
+    if any(set(record) != EXPECTED_FIELDS for record in records):
+        raise ValueError(f"{source_name}: inconsistent fields between records")
+    return records
+
+
 def land_sample(year: str):
     source = Path(os.environ["RAW_DATA_DIR"]) / "disease" / f"disease_cases_{year}_sample.json"
     if not source.is_file():
         raise FileNotFoundError(f"Required raw input is missing: {source.name}")
 
     payload = source.read_bytes()
-    records = json.loads(payload.decode("utf-8"))
-    if not isinstance(records, list) or not records:
-        raise ValueError(f"{source.name}: expected a non-empty JSON array of records")
-    if not records or set(records[0]) != EXPECTED_FIELDS:
-        raise ValueError(f"{source.name}: source fields do not match the 16-field data contract")
-    if any(set(record) != EXPECTED_FIELDS for record in records):
-        raise ValueError(f"{source.name}: inconsistent fields between records")
+    records = _validate_disease(payload, source.name)
 
     digest = hashlib.sha256(payload).hexdigest()
     bucket = os.environ["DATA_LAKE_BUCKET"]

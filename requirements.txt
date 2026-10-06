@@ -1,5 +1,15 @@
+# Ingestion and profiling (Part 1)
 requests
 pandas
 openpyxl
 python-dotenv
 boto3==1.35.99
+
+# Spark processing (Part 3) — requires Java 17 and Python 3.11/3.12
+pyspark==3.5.3
+
+# Warehouse loader run from the host (Part 4)
+psycopg2-binary
+
+# Tests
+pytest

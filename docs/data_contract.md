@@ -394,25 +394,31 @@ PART 2 ต้องรักษา Raw Data ต้นฉบับไว้
 
 ---
 
-# 18. Recommended Data Lake Structure
+# 18. Data Lake Structure
 
-raw/
-|
-+-- disease/
-|   |
-|   +-- year=2568/
-|   |   +-- disease_cases_2568_sample.json
-|   |
-|   +-- year=2569/
-|       +-- disease_cases_2569_sample.json
-|
-+-- population/
-    |
-    +-- year=2568/
-    |   +-- population_buengkum_2568.xlsx
-    |
-    +-- year=2569/
-        +-- population_buengkum_2569.xlsx
+Bucket `disease-surveillance` (SeaweedFS, S3-compatible):
+
+```text
+raw/                                   PART 2 lands original bytes (immutable)
++-- disease/year={ปี}/
+|   +-- disease_cases_{ปี}_sample.json
+|   +-- _metadata/disease_cases_{ปี}_sample.manifest.json   (sha256, record count)
++-- population/year={ปี}/              optional (cases-only mode when absent)
+    +-- population_summary_{ปี}.csv    columns ปี,เขต,ประชากรรวม; exactly 50 districts
+    +-- _metadata/population_summary_{ปี}.manifest.json
+
+processed/                             PART 3 Spark output (Parquet, rebuilt each run)
++-- clean/disease_cleaned/
++-- quarantine/disease_rejected/       rejected rows with _quarantine_reason
++-- standardized/disease_standardized/
++-- gold/disease_with_population/curated_disease_data/
++-- warehouse/{dim_date, dim_district, dim_disease, dim_age_group, dim_sex,
+|              fact_disease_cases, fact_population}/
++-- quality/data_quality_report/
+```
+
+The Excel files for เขตบึงกุ่ม (section 9–15) are a local reference only and
+are not landed in the lake.
 
 ---
 

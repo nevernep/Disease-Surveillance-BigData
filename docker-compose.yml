@@ -61,7 +61,7 @@ services:
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:${AIRFLOW_DB_PASSWORD:-airflow-local-only}@postgres/airflow
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
       AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
-      AIRFLOW__API__AUTH_BACKENDS: airflow.api.auth.backend.basic_auth
+      AIRFLOW__API__AUTH_BACKENDS: airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session
       AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "false"
       AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
       AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:-}
@@ -83,7 +83,7 @@ services:
       DATA_LAKE_BUCKET: ${DATA_LAKE_BUCKET:-disease-surveillance}
       # Spark reads raw/ and writes processed/ on the lake. Set to empty for local-file mode.
       DATA_LAKE_URI: ${DATA_LAKE_URI-s3a://${DATA_LAKE_BUCKET:-disease-surveillance}}
-      RAW_DATA_DIR: /opt/airflow/data/raw
+      RAW_DATA_DIR: /opt/airflow/project/data/raw
       REQUIRE_POPULATION: ${REQUIRE_POPULATION:-false}
       WAREHOUSE_DB_HOST: warehouse-db
       WAREHOUSE_DB_PORT: "5432"
@@ -95,11 +95,12 @@ services:
       - "8080:8080"
     volumes:
       - ./airflow/dags:/opt/airflow/dags
-      - ./data/raw:/opt/airflow/data/raw:ro
       - ./data/raw:/opt/airflow/project/data/raw:ro
       - ./data/processed:/opt/airflow/project/data/processed
       - ./spark:/opt/airflow/project/spark:ro
       - ./sql:/opt/airflow/project/sql:ro
+      - ./tests:/opt/airflow/project/tests:ro
+      - ./pytest.ini:/opt/airflow/project/pytest.ini:ro
       - airflow_logs:/opt/airflow/logs
     healthcheck:
       test: ["CMD-SHELL", "curl --fail http://localhost:8080/health || exit 1"]

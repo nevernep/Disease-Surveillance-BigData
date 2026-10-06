@@ -27,4 +27,5 @@ RUN pip install --no-cache-dir \
     boto3==1.35.99 \
     openpyxl \
     pandas \
-    pyspark==3.5.3
+    pyspark==3.5.3 \
+    pytest

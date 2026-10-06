@@ -3,7 +3,7 @@ from pathlib import Path
 
 from pyspark.sql import DataFrame
 
-from spark.config import ProjectPaths
+from spark.config import ProjectPaths, is_remote_uri
 
 
 def remove_path(path: Path) -> None:
@@ -17,12 +17,14 @@ def remove_path(path: Path) -> None:
 
 def write_parquet_directory(
     dataframe: DataFrame,
-    output_path: Path,
+    output_path: "Path | str",
 ) -> None:
-    """เขียน Parquet แบบหลาย part สำหรับชั้น Clean และ Standardized"""
+    """เขียน Parquet แบบหลาย part ลงเครื่องหรือ Data Lake (s3a://)"""
 
-    remove_path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+    if not is_remote_uri(output_path):
+        output_path = Path(output_path)
+        remove_path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
 
     (
         dataframe.write
@@ -102,13 +104,12 @@ def write_warehouse_tables(
     tables: dict[str, DataFrame],
     paths: ProjectPaths,
 ) -> None:
-    """Write BI-friendly star-schema tables as CSV and Parquet."""
+    """Write star-schema tables: local CSV for BI, Parquet locally or on the lake."""
 
     for table_name, dataframe in tables.items():
-        table_dir = paths.warehouse_dir / table_name
         write_single_file(
             dataframe,
             paths.warehouse_dir / f"{table_name}.csv",
             "csv",
         )
-        write_parquet_directory(dataframe, table_dir)
+        write_parquet_directory(dataframe, paths.warehouse_table(table_name))

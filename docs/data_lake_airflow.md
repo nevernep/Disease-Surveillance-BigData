@@ -7,7 +7,8 @@
 ## บริการที่ใช้
 
 - **SeaweedFS**: จัดเก็บข้อมูลแบบ S3-compatible เปิด S3 API ที่ `localhost:8333` และหน้า filer ที่ `localhost:8888`
-- **PostgreSQL**: เก็บ metadata ของ Airflow ไม่ใช่ Data Warehouse
+- **PostgreSQL (`postgres`)**: เก็บ metadata ของ Airflow ไม่ใช่ Data Warehouse
+- **PostgreSQL Data Warehouse (`warehouse-db`)**: เก็บ star schema ใน schema `mart` (ตารางสร้างจาก `sql/ddl.sql`, views จาก `sql/analytics_views.sql`) เปิดให้ Power BI ที่ `localhost:5433` ฐานข้อมูล `surveillance_dw` เฉพาะในเครื่อง (loopback) และ task `load_warehouse` ใน DAG `spark_processing` จะโหลดข้อมูลให้อัตโนมัติหลัง Spark สำเร็จ
 - **Airflow**: ควบคุม workflow ในเครื่องด้วย LocalExecutor เปิดหน้าเว็บที่ `localhost:8080`
 
 ข้อมูลใน SeaweedFS, metadata ของ Airflow และ task logs จะเก็บใน Docker named volumes ส่วน Airflow mount โฟลเดอร์ `data/raw` แบบอ่านอย่างเดียว
@@ -18,6 +19,8 @@
 2. เริ่มบริการด้วย `docker compose up -d --build`
 3. ตรวจสถานะด้วย `docker compose ps`
 4. เข้าสู่ Airflow โดยใช้ `AIRFLOW_ADMIN_USER` และ `AIRFLOW_ADMIN_PASSWORD` จาก `.env` (ค่าตั้งต้นคือ `airflow` / `airflow-local-only`) จากนั้น unpause DAG หากยัง pause อยู่ แล้วสั่งรัน `disease_raw_to_lake`
+   - user นี้สร้างตอน container เริ่มทำงาน (`_AIRFLOW_WWW_USER_CREATE=true`) ถ้า user มีอยู่แล้ว การเปลี่ยนรหัสใน `.env` จะไม่มีผล ให้ใช้ `docker compose exec airflow airflow users reset-password -u airflow -p <รหัสใหม่>`
+   - ถ้าเปิด `http://localhost:8080` ไม่ขึ้นแต่ container ยังรันอยู่ (สถานะ unhealthy) ให้ `docker compose restart airflow` เพราะ `airflow standalone` ไม่เปิด webserver ใหม่เองหากล่มระหว่างที่ Spark ใช้ทรัพยากรเต็ม
 5. ดูข้อมูลผ่าน SeaweedFS filer ที่ `http://localhost:8888` หรือใช้ S3 client เชื่อมต่อ `http://localhost:8333`
 6. หยุดบริการโดยเก็บข้อมูลไว้ด้วย `docker compose down` หากต้องการล้างข้อมูลและฐานข้อมูลของชุดพัฒนา ให้ใช้ `docker compose down -v` ซึ่งจะลบ Docker volumes ด้วย
 
@@ -27,7 +30,7 @@ API token ใน `.env` ใช้เฉพาะตอนเรียกสค�
 
 DAG `disease_raw_to_lake` ตรวจและสร้าง bucket หากยังไม่มี จากนั้นนำเข้าข้อมูลโรคและ population ของปี 2568 และ 2569 โดย task ของแต่ละปีทำงานขนานกันได้
 
-DAG ตรวจว่ามีไฟล์ทั้งสองปี ตรวจว่าแต่ละไฟล์มี 100 records และมี 16 fields ตาม Data Contract จากนั้นเก็บ byte ต้นฉบับลง bucket ตาม key เหล่านี้:
+DAG ตรวจว่ามีไฟล์ทั้งสองปี ตรวจว่าแต่ละไฟล์เป็น JSON array ที่ไม่ว่าง (รองรับทั้ง sample และข้อมูลเต็ม) และทุก record มี 16 fields ตาม Data Contract จากนั้นเก็บ byte ต้นฉบับลง bucket ตาม key เหล่านี้:
 
 ```text
 raw/disease/year=2568/disease_cases_2568_sample.json
@@ -66,8 +69,8 @@ python -m spark.validate_population_reference --project-root .
 ผลลัพธ์จะถูกสร้างเป็น:
 
 ```text
-data/raw/disease/reference/ประชากรและครัวเรือน_2568.csv
-data/raw/disease/reference/ประชากรและครัวเรือน_2569.csv
+data/raw/disease/reference/population_summary_2568.csv
+data/raw/disease/reference/population_summary_2569.csv
 ```
 
 ถ้าต้องการแทนที่ไฟล์ผลลัพธ์เดิม ต้องระบุ `--overwrite` อย่างชัดเจน
@@ -97,12 +100,30 @@ docker compose exec airflow airflow dags trigger disease_raw_to_lake
 docker compose exec airflow airflow dags trigger spark_processing
 ```
 
-ผลลัพธ์จะถูกเขียนใน `data/processed/` ของโปรเจกต์
-และตรวจคุณภาพด้วย `--fail-on-dq`; หาก Data Quality ไม่ผ่าน task จะล้มเหลว
+ตรวจคุณภาพด้วย `--fail-on-dq`; หาก Data Quality ไม่ผ่าน task จะล้มเหลว
 
-ไฟล์ `spark/convert_excel_to_csv.py` ไม่ใช่ source ingestion
-เพราะมีค่าประชากรที่เขียนตายตัวในโค้ด จึงห้ามใช้สร้างข้อมูลประชากรจริง
-สำหรับ pipeline ต้องใช้ CSV ที่มาจากแหล่งทางการและผ่าน validation เท่านั้น
+### Spark อ่าน/เขียนผ่าน Data Lake
+
+เมื่อกำหนด `DATA_LAKE_URI` (ค่าตั้งต้นใน Compose คือ `s3a://disease-surveillance`)
+Spark จะอ่าน Raw จาก Data Lake ผ่าน S3A connector (`hadoop-aws` ติดตั้งไว้ใน image)
+ไม่ได้อ่านจากโฟลเดอร์ในเครื่อง:
+
+```text
+อ่าน   raw/disease/year=*/disease_cases_*.json
+อ่าน   raw/population/year=*/population_summary_*.csv   (ถ้าไม่มี = โหมด cases-only)
+เขียน  processed/clean/disease_cleaned/                  (Parquet)
+เขียน  processed/quarantine/disease_rejected/            (Parquet)
+เขียน  processed/standardized/disease_standardized/      (Parquet)
+เขียน  processed/gold/disease_with_population/curated_disease_data/
+เขียน  processed/warehouse/{dim_date,dim_district,dim_disease,fact_disease_cases}/
+เขียน  processed/quality/data_quality_report/
+```
+
+ไฟล์ CSV สำหรับ Power BI (`warehouse/*.csv`, gold CSV และ quality report CSV)
+ยังเขียนลง `data/processed/` ในเครื่องเพื่อให้เปิดใช้งานได้ทันที
+
+ถ้าต้องการรัน Spark กับไฟล์ในเครื่องโดยไม่ใช้ Data Lake (เช่น ตอนพัฒนา)
+ให้ตั้ง `DATA_LAKE_URI=` เป็นค่าว่าง
 
 ## ความปลอดภัยสำหรับการพัฒนาในเครื่อง
 

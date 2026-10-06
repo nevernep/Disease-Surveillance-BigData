@@ -1,11 +1,12 @@
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
 
 from spark.config import Settings
 from spark.deduplication import count_duplicate_keys
+from spark.warehouse import FACT_CASES_KEY
 from spark.schemas import BANGKOK_DISTRICTS, GOLD_PRIMARY_KEY
 
 
@@ -22,6 +23,9 @@ def _status(condition: bool) -> str:
     return "PASS" if condition else "FAIL"
 
 
+SKIP = "SKIP"
+
+
 def run_quality_checks(
     spark: SparkSession,
     raw: DataFrame,
@@ -31,6 +35,8 @@ def run_quality_checks(
     removed_duplicates: int,
     settings: Settings,
     canonical: Optional[DataFrame] = None,
+    population_available: bool = True,
+    warehouse: Optional[Dict[str, DataFrame]] = None,
 ) -> Tuple[DataFrame, bool]:
     """ตรวจกฎคุณภาพข้อมูลทั้งหมดและคืนผลเป็น DataFrame"""
 
@@ -48,10 +54,12 @@ def run_quality_checks(
     ).count()
 
     population_covered_rows = curated_rows - missing_population
-    missing_population_rate = 0.0
     population_uncovered_rate = (
         missing_population / curated_rows if curated_rows else 0.0
     )
+    # Real rate (was hard-coded to 0). Only enforced when population was
+    # loaded; in cases-only mode every row is uncovered by design.
+    missing_population_rate = population_uncovered_rate
     population_coverage_rate = (
         population_covered_rows / curated_rows
         if curated_rows
@@ -94,9 +102,20 @@ def run_quality_checks(
     missing_report_dates = validation_source.filter(
         F.col("report_date").isNull()
     ).count()
-    invalid_ages = validation_source.filter(
+    # Invalid ages must not survive cleaning; rows caught upstream are
+    # quarantined and reported separately (informational).
+    invalid_ages = cleaned.filter(
         F.col("age").isNotNull()
         & ~F.col("age").between(0, settings.maximum_age)
+    ).count()
+    quarantined_rows = (
+        canonical.count() - clean_rows if canonical is not None else 0
+    )
+    # year_be comes from the resource/file year; flag cases whose onset date
+    # falls in another year (e.g. if a resource were a fiscal year).
+    year_date_mismatch_rows = cleaned.filter(
+        F.col("report_date").isNotNull()
+        & (F.col("year_be") != F.year("report_date") + F.lit(543))
     ).count()
     required_columns = {
         "year_be", "disease_name_raw", "district_name_raw",
@@ -140,12 +159,20 @@ def run_quality_checks(
             str(curated_rows), "> 0", _status(curated_rows > 0),
         ),
         QualityCheck(
-            "gold", "missing_population_rate_within_covered_rows",
+            "gold", "missing_population_rate",
             f"{missing_population_rate:.4f}",
-            f"<= {settings.max_missing_population_rate:.4f}",
-            _status(
-                missing_population_rate
-                <= settings.max_missing_population_rate
+            (
+                f"<= {settings.max_missing_population_rate:.4f}"
+                if population_available
+                else "cases-only mode (no population)"
+            ),
+            (
+                _status(
+                    missing_population_rate
+                    <= settings.max_missing_population_rate
+                )
+                if population_available
+                else SKIP
             ),
         ),
         QualityCheck(
@@ -201,11 +228,22 @@ def run_quality_checks(
             str(missing_report_dates), "informational", "PASS",
         ),
         QualityCheck(
-            "dq", "invalid_age_rows",
+            "dq", "invalid_age_rows_after_clean",
             str(invalid_ages), "= 0",
             _status(invalid_ages == 0),
         ),
+        QualityCheck(
+            "clean", "quarantined_rows",
+            str(quarantined_rows), "informational", "PASS",
+        ),
+        QualityCheck(
+            "clean", "year_be_vs_report_date_mismatch_rows",
+            str(year_date_mismatch_rows), "informational", "PASS",
+        ),
     ]
+
+    if warehouse is not None:
+        checks.extend(_warehouse_checks(standardized, warehouse))
 
     report = spark.createDataFrame(
         [check.__dict__ for check in checks]
@@ -214,3 +252,40 @@ def run_quality_checks(
     has_failure = any(check.status == "FAIL" for check in checks)
 
     return report, has_failure
+
+
+def _warehouse_checks(
+    standardized: DataFrame,
+    warehouse: Dict[str, DataFrame],
+) -> List[QualityCheck]:
+    """Reconcile the star schema against the case-level source."""
+
+    fact = warehouse["fact_disease_cases"]
+    source_cases = standardized.agg(
+        F.coalesce(F.round(F.sum("case_count")), F.lit(0)).cast("long")
+    ).first()[0]
+    fact_cases = fact.agg(
+        F.coalesce(F.sum("total_cases"), F.lit(0)).cast("long")
+    ).first()[0]
+    duplicate_fact_keys = count_duplicate_keys(fact, FACT_CASES_KEY)
+    unmatched_date_keys = fact.join(
+        warehouse["dim_date"], "date_key", "left_anti"
+    ).count()
+
+    return [
+        QualityCheck(
+            "warehouse", "fact_cases_reconcile_with_standardized",
+            str(fact_cases - source_cases), "= 0",
+            _status(fact_cases == source_cases),
+        ),
+        QualityCheck(
+            "warehouse", "fact_primary_key_unique",
+            str(duplicate_fact_keys), "= 0",
+            _status(duplicate_fact_keys == 0),
+        ),
+        QualityCheck(
+            "warehouse", "fact_date_key_in_dim_date",
+            str(unmatched_date_keys), "= 0",
+            _status(unmatched_date_keys == 0),
+        ),
+    ]

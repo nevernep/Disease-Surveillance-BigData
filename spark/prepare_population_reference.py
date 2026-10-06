@@ -189,8 +189,8 @@ def main() -> int:
         args.project_root / "data" / "raw" / "disease" / "reference"
     ).resolve()
     outputs = {
-        2568: reference / "ประชากรและครัวเรือน_2568.csv",
-        2569: reference / "ประชากรและครัวเรือน_2569.csv",
+        2568: reference / "population_summary_2568.csv",
+        2569: reference / "population_summary_2569.csv",
     }
     prepared = {
         year: prepare_year(source, year)

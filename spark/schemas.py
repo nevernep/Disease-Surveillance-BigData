@@ -143,6 +143,7 @@ _DISEASE_HFMD = "โรคมือเท้าปาก"
 _DISEASE_COVID = "โควิด-19"
 _DISEASE_DIARRHEA = "อุจจาระร่วงเฉียบพลัน"
 _DISEASE_TUBERCULOSIS = "วัณโรค"
+_DISEASE_PNEUMONIA = "ปอดบวม"
 
 DISEASE_ALIASES = {
     _DISEASE_DENGUE: _DISEASE_DENGUE,
@@ -160,9 +161,20 @@ DISEASE_ALIASES = {
     _DISEASE_COVID: _DISEASE_COVID,
     "covid19": _DISEASE_COVID,
     "covid-19": _DISEASE_COVID,
+    "โรคโควิด-19": _DISEASE_COVID,
+    "โควิด-19 (COVID-19)": _DISEASE_COVID,
+    "โรคติดเชื้อไวรัสโคโรนา 2019": _DISEASE_COVID,
     "อุจจาระร่วง": _DISEASE_DIARRHEA,
     "โรคอุจจาระร่วง": _DISEASE_DIARRHEA,
+    _DISEASE_DIARRHEA: _DISEASE_DIARRHEA,
+    "โรคอุจจาระร่วงเฉียบพลัน": _DISEASE_DIARRHEA,
     "diarrhea": _DISEASE_DIARRHEA,
+    "acutediarrhea": _DISEASE_DIARRHEA,
+    _DISEASE_PNEUMONIA: _DISEASE_PNEUMONIA,
+    "โรคปอดบวม": _DISEASE_PNEUMONIA,
+    "ปอดอักเสบ": _DISEASE_PNEUMONIA,
+    "โรคปอดอักเสบ": _DISEASE_PNEUMONIA,
+    "pneumonia": _DISEASE_PNEUMONIA,
     _DISEASE_TUBERCULOSIS: _DISEASE_TUBERCULOSIS,
     "tuberculosis": _DISEASE_TUBERCULOSIS,
     "tb": _DISEASE_TUBERCULOSIS,
@@ -172,3 +184,29 @@ SEX_ALIASES = {
     "m": "M", "male": "M", "ชาย": "M", "1": "M",
     "f": "F", "female": "F", "หญิง": "F", "2": "F",
 }
+# ---------------------------------------------------------
+# Demographic dimensions (static)
+# ---------------------------------------------------------
+
+UNKNOWN_AGE_GROUP_KEY = 10
+
+# (age_group_key, label, min_age, max_age) — ช่วงอายุตามรายงานเฝ้าระวังโรค
+AGE_GROUPS = [
+    (1, "0-4", 0, 4),
+    (2, "5-9", 5, 9),
+    (3, "10-14", 10, 14),
+    (4, "15-24", 15, 24),
+    (5, "25-34", 25, 34),
+    (6, "35-44", 35, 44),
+    (7, "45-54", 45, 54),
+    (8, "55-64", 55, 64),
+    (9, "65+", 65, None),
+    (UNKNOWN_AGE_GROUP_KEY, "ไม่ระบุ", None, None),
+]
+
+SEX_LABELS = {"M": "ชาย", "F": "หญิง", "U": "ไม่ระบุ"}
+
+THAI_MONTH_ABBREVIATIONS = [
+    "ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.",
+    "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค.",
+]

@@ -213,57 +213,26 @@ def canonicalize_disease_data(dataframe: DataFrame) -> DataFrame:
     )
 
 
-def clean_disease_data(
-    dataframe: DataFrame,
-    settings: Settings,
-) -> DataFrame:
-    """กรองแถวที่ไม่สมบูรณ์หรือมีค่าผิดปกติออก"""
+def invalid_reason(settings: Settings) -> Column:
+    """สาเหตุที่แถวไม่ผ่าน validation (null = ผ่าน)
+
+    ใช้ร่วมกันทั้ง clean และ quarantine เพื่อให้ทุกแถวไปอยู่ฝั่งใดฝั่งหนึ่งเท่านั้น
+    """
+
+    def blank(column: str) -> Column:
+        return F.col(column).isNull() | (F.length(F.trim(F.col(column))) == 0)
 
     return (
-        dataframe
-        .filter(
-            F.col("year_be").between(
-                settings.minimum_year_be,
-                settings.maximum_year_be,
-            )
-        )
-        .filter(F.col("disease_name_raw").isNotNull())
-        .filter(F.length(F.trim(F.col("disease_name_raw"))) > 0)
-        .filter(F.col("district_name_raw").isNotNull())
-        .filter(F.length(F.trim(F.col("district_name_raw"))) > 0)
-        .filter(F.col("case_count").isNotNull())
-        .filter(F.col("case_count") > 0)
-        .filter(
-            F.col("age").isNull()
-            | F.col("age").between(0, settings.maximum_age)
-        )
-    )
-
-
-def quarantine_disease_data(
-    dataframe: DataFrame,
-    settings: Settings,
-) -> DataFrame:
-    """เก็บแถวที่ไม่ผ่าน schema/type/range validation พร้อมสาเหตุ"""
-
-    invalid_reason = (
         F.when(
-            ~F.col("year_be").between(
+            F.col("year_be").isNull()
+            | ~F.col("year_be").between(
                 settings.minimum_year_be,
                 settings.maximum_year_be,
             ),
             F.lit("invalid_year"),
         )
-        .when(
-            F.col("disease_name_raw").isNull()
-            | (F.length(F.trim(F.col("disease_name_raw"))) == 0),
-            F.lit("missing_disease_name"),
-        )
-        .when(
-            F.col("district_name_raw").isNull()
-            | (F.length(F.trim(F.col("district_name_raw"))) == 0),
-            F.lit("missing_district_name"),
-        )
+        .when(blank("disease_name_raw"), F.lit("missing_disease_name"))
+        .when(blank("district_name_raw"), F.lit("missing_district_name"))
         .when(
             F.col("case_count").isNull() | (F.col("case_count") <= 0),
             F.lit("invalid_case_count"),
@@ -280,8 +249,24 @@ def quarantine_disease_data(
         .otherwise(F.lit(None).cast("string"))
     )
 
+
+def clean_disease_data(
+    dataframe: DataFrame,
+    settings: Settings,
+) -> DataFrame:
+    """เก็บเฉพาะแถวที่ผ่าน validation ทุกข้อ (ตรงข้ามกับ quarantine)"""
+
+    return dataframe.filter(invalid_reason(settings).isNull())
+
+
+def quarantine_disease_data(
+    dataframe: DataFrame,
+    settings: Settings,
+) -> DataFrame:
+    """เก็บแถวที่ไม่ผ่าน schema/type/range validation พร้อมสาเหตุ"""
+
     return (
         dataframe
-        .withColumn("_quarantine_reason", invalid_reason)
+        .withColumn("_quarantine_reason", invalid_reason(settings))
         .filter(F.col("_quarantine_reason").isNotNull())
     )

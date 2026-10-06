@@ -27,6 +27,25 @@ services:
       retries: 10
     restart: unless-stopped
 
+  # Data Warehouse (star schema for BI). Separate from Airflow's metadata DB.
+  warehouse-db:
+    image: postgres:16.4
+    environment:
+      POSTGRES_USER: ${WAREHOUSE_DB_USER:-dw_user}
+      POSTGRES_PASSWORD: ${WAREHOUSE_DB_PASSWORD:-warehouse-local-only}
+      POSTGRES_DB: ${WAREHOUSE_DB_NAME:-surveillance_dw}
+    ports:
+      # Power BI on the host connects to localhost:5433 (loopback only).
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - warehouse_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
   airflow:
     build: ./airflow
     depends_on:
@@ -34,6 +53,8 @@ services:
         condition: service_healthy
       object-store:
         condition: service_started
+      warehouse-db:
+        condition: service_healthy
     command: standalone
     environment:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
@@ -45,13 +66,30 @@ services:
       AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
       AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:-}
       AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY:-local-development-secret-key}
+      # `standalone` ignores _AIRFLOW_WWW_USER_*; the image entrypoint creates
+      # this login (idempotently) only when these two flags are set.
+      _AIRFLOW_DB_MIGRATE: "true"
+      _AIRFLOW_WWW_USER_CREATE: "true"
       _AIRFLOW_WWW_USER_USERNAME: ${AIRFLOW_ADMIN_USER:-airflow}
       _AIRFLOW_WWW_USER_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:-airflow-local-only}
+      # Keep the UI alive while Spark saturates the container: fewer gunicorn
+      # workers, longer startup timeout, and Spark capped at 2 cores.
+      AIRFLOW__WEBSERVER__WORKERS: "2"
+      AIRFLOW__WEBSERVER__WEB_SERVER_MASTER_TIMEOUT: "300"
+      SPARK_MASTER: ${SPARK_MASTER:-local[2]}
       S3_ENDPOINT: http://object-store:8333
       S3_ACCESS_KEY: ${S3_ACCESS_KEY:-surveillance-local}
       S3_SECRET_KEY: ${S3_SECRET_KEY:-surveillance-local-secret}
       DATA_LAKE_BUCKET: ${DATA_LAKE_BUCKET:-disease-surveillance}
+      # Spark reads raw/ and writes processed/ on the lake. Set to empty for local-file mode.
+      DATA_LAKE_URI: ${DATA_LAKE_URI-s3a://${DATA_LAKE_BUCKET:-disease-surveillance}}
       RAW_DATA_DIR: /opt/airflow/data/raw
+      REQUIRE_POPULATION: ${REQUIRE_POPULATION:-false}
+      WAREHOUSE_DB_HOST: warehouse-db
+      WAREHOUSE_DB_PORT: "5432"
+      WAREHOUSE_DB_NAME: ${WAREHOUSE_DB_NAME:-surveillance_dw}
+      WAREHOUSE_DB_USER: ${WAREHOUSE_DB_USER:-dw_user}
+      WAREHOUSE_DB_PASSWORD: ${WAREHOUSE_DB_PASSWORD:-warehouse-local-only}
       PYTHONPATH: /opt/airflow/project
     ports:
       - "8080:8080"
@@ -61,6 +99,7 @@ services:
       - ./data/raw:/opt/airflow/project/data/raw:ro
       - ./data/processed:/opt/airflow/project/data/processed
       - ./spark:/opt/airflow/project/spark:ro
+      - ./sql:/opt/airflow/project/sql:ro
       - airflow_logs:/opt/airflow/logs
     healthcheck:
       test: ["CMD-SHELL", "curl --fail http://localhost:8080/health || exit 1"]
@@ -73,4 +112,5 @@ services:
 volumes:
   object_store_data:
   postgres_data:
+  warehouse_data:
   airflow_logs:

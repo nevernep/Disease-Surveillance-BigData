@@ -1,20 +1,55 @@
+// Model: fact_disease_cases (month × district × disease × age group × sex)
+//        fact_population    (year × district) — incidence denominator
+// fact_population relates to dim_district only. The year filter reaches it
+// through TREATAS, and disease/age/sex filters never touch it, so the
+// denominator always covers every district in scope.
+
 Total Cases = SUM(fact_disease_cases[total_cases])
 
 Source Records = SUM(fact_disease_cases[source_records])
 
-Covered Population =
-SUMX(
-    SUMMARIZE(
-        fact_disease_cases,
-        fact_disease_cases[date_key],
-        fact_disease_cases[district_key],
-        "DistrictPopulation", MAX(fact_disease_cases[population])
-    ),
-    [DistrictPopulation]
+Population =
+CALCULATE(
+    SUM(fact_population[population]),
+    TREATAS(VALUES(dim_date[year_be]), fact_population[year_be])
 )
 
+// Blank when sliced by age group or sex: population by age/sex is not loaded,
+// so dividing by total population would give a misleading rate.
 Incidence Rate per 100k =
-DIVIDE([Total Cases] * 100000, [Covered Population])
+IF(
+    ISFILTERED(dim_age_group) || ISFILTERED(dim_sex),
+    BLANK(),
+    DIVIDE([Total Cases] * 100000, [Population])
+)
+
+Population Coverage % =
+VAR DistrictsInScope =
+    CALCULATE(
+        DISTINCTCOUNT(dim_district[district_key]),
+        dim_district[is_bangkok_district] = TRUE()
+    )
+VAR DistrictsWithPopulation =
+    CALCULATE(
+        DISTINCTCOUNT(fact_population[district_key]),
+        TREATAS(VALUES(dim_date[year_be]), fact_population[year_be]),
+        dim_district[is_bangkok_district] = TRUE()
+    )
+RETURN
+    DIVIDE(DistrictsWithPopulation, DistrictsInScope)
+
+Population Coverage Status =
+IF(
+    [Population Coverage %] >= 1,
+    "ครบถ้วน",
+    "ไม่มี/ไม่ครบ — แสดงเฉพาะจำนวนผู้ป่วย"
+)
+
+Case Share % =
+DIVIDE(
+    [Total Cases],
+    CALCULATE([Total Cases], ALL(dim_age_group), ALL(dim_sex))
+)
 
 District Rank =
 RANKX(
@@ -25,28 +60,17 @@ RANKX(
     Dense
 )
 
-Year over Year Cases % =
-VAR CurrentCases = [Total Cases]
-VAR CurrentYear = MAX(dim_date[year_be])
-VAR PreviousCases =
-    CALCULATE(
-        [Total Cases],
-        FILTER(
-            ALL(dim_date[year_be]),
-            dim_date[year_be] = CurrentYear - 1
-        )
-    )
-RETURN
-    DIVIDE(CurrentCases - PreviousCases, PreviousCases)
+Cases Previous Month =
+CALCULATE([Total Cases], DATEADD(dim_date[month_start], -1, MONTH))
 
-Population Coverage Status =
-VAR MissingRows =
-    COUNTROWS(
-        FILTER(
-            fact_disease_cases,
-            ISBLANK(fact_disease_cases[population])
-                || fact_disease_cases[population] <= 0
-        )
-    )
-RETURN
-    IF(MissingRows > 0, "มีข้อมูลประชากรไม่ครบ", "ครบถ้วน")
+Month over Month Cases % =
+DIVIDE([Total Cases] - [Cases Previous Month], [Cases Previous Month])
+
+Cases Same Month Last Year =
+CALCULATE([Total Cases], SAMEPERIODLASTYEAR(dim_date[month_start]))
+
+Year over Year Cases % =
+DIVIDE(
+    [Total Cases] - [Cases Same Month Last Year],
+    [Cases Same Month Last Year]
+)

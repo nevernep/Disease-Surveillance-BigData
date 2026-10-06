@@ -1,4 +1,6 @@
 data/raw/*
+!data/raw/disease/
+data/raw/disease/*
 !data/raw/disease/reference/
 data/processed/
 data/gold/

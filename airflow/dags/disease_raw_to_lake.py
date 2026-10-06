@@ -12,6 +12,7 @@ from pathlib import Path
 import boto3
 from botocore.exceptions import ClientError
 from airflow import DAG  # pyright: ignore[reportAttributeAccessIssue, reportMissingImports]
+from airflow.exceptions import AirflowSkipException  # pyright: ignore[reportMissingImports]
 from airflow.operators.trigger_dagrun import (  # pyright: ignore[reportMissingImports]
     TriggerDagRunOperator,
 )
@@ -73,8 +74,8 @@ def land_sample(year: str):
 
     payload = source.read_bytes()
     records = json.loads(payload.decode("utf-8"))
-    if not isinstance(records, list) or len(records) != 100:
-        raise ValueError(f"{source.name}: expected a JSON array of 100 records")
+    if not isinstance(records, list) or not records:
+        raise ValueError(f"{source.name}: expected a non-empty JSON array of records")
     if not records or set(records[0]) != EXPECTED_FIELDS:
         raise ValueError(f"{source.name}: source fields do not match the 16-field data contract")
     if any(set(record) != EXPECTED_FIELDS for record in records):
@@ -125,6 +126,11 @@ def land_sample(year: str):
         ContentType=JSON_CONTENT_TYPE,
     )
     print(f"Landed {len(records)} records: s3://{bucket}/{key}; sha256={digest}")
+
+
+def population_required() -> bool:
+    """Population is optional unless REQUIRE_POPULATION is set (cases-only mode)."""
+    return os.environ.get("REQUIRE_POPULATION", "false").strip().lower() in {"1", "true", "yes"}
 
 
 def _population_source(year: str) -> Path:
@@ -187,6 +193,11 @@ def _validate_population(year: str, payload: bytes, source: Path) -> int:
 def land_population(year: str):
     source = _population_source(year)
     if not source.is_file():
+        if not population_required():
+            raise AirflowSkipException(
+                f"Population reference not found ({source.name}); "
+                "running in cases-only mode. Set REQUIRE_POPULATION=true to fail instead."
+            )
         raise FileNotFoundError(
             f"Required population reference is missing: {source}"
         )
@@ -279,6 +290,8 @@ with DAG(
         task_id="trigger_spark_processing",
         trigger_dag_id="spark_processing",
         wait_for_completion=False,
+        # Skipped population tasks (cases-only mode) must not block Spark.
+        trigger_rule="none_failed",
     )
     create_bucket >> trigger_spark  # pyright: ignore[reportUnusedExpression]
     for data_year in YEARS:

@@ -10,6 +10,7 @@ from spark.cleaners import find_column
 from spark.schemas import POPULATION_COLUMN_ALIASES
 
 NESTED_RECORD_KEYS = ["data", "records", "result", "results", "items"]
+PATH_NOT_FOUND_MARKERS = ("PATH_NOT_FOUND", "Path does not exist")
 CSV_ENCODINGS = ["utf-8-sig", "utf-8", "cp874", "tis-620"]
 
 
@@ -68,6 +69,73 @@ def read_disease_json(
         dataframe = dataframe.drop("_corrupt_record")
 
     return dataframe
+
+
+def _read_lake(reader, path_glob: str, file_format: str) -> DataFrame:
+    """อ่านไฟล์จาก Data Lake; แปลง path-not-found เป็น FileNotFoundError"""
+
+    from pyspark.errors import AnalysisException
+
+    try:
+        return getattr(reader, file_format)(path_glob)
+    except AnalysisException as error:
+        if any(marker in str(error) for marker in PATH_NOT_FOUND_MARKERS):
+            raise FileNotFoundError(f"ไม่พบไฟล์ใน Data Lake: {path_glob}") from error
+        raise
+
+
+def read_disease_from_lake(
+    spark: SparkSession,
+    path_glob: str,
+) -> DataFrame:
+    """อ่าน Raw JSON ที่ DAG land ไว้ใน raw/disease/year=*/ ของ Data Lake"""
+
+    reader = (
+        spark.read
+        .option("multiLine", True)
+        .option("mode", "PERMISSIVE")
+    )
+    dataframe = _read_lake(reader, path_glob, "json")
+    dataframe = dataframe.withColumn("_source_file", F.input_file_name())
+    dataframe = _flatten_nested_records(dataframe)
+
+    if "_corrupt_record" in dataframe.columns:
+        dataframe = dataframe.drop("_corrupt_record")
+
+    return dataframe
+
+
+def read_population_from_lake(
+    spark: SparkSession,
+    path_glob: str,
+) -> DataFrame:
+    """อ่าน population_summary_{year}.csv จาก raw/population/year=*/"""
+
+    reader = (
+        spark.read
+        .option("header", True)
+        .option("encoding", "UTF-8")
+    )
+    dataframe = _read_lake(reader, path_glob, "csv")
+
+    # ไฟล์เขียนด้วย utf-8-sig: ตัด BOM ออกจากชื่อคอลัมน์แรก
+    for column in dataframe.columns:
+        cleaned = column.replace("\ufeff", "").strip()
+        if cleaned != column:
+            dataframe = dataframe.withColumnRenamed(column, cleaned)
+
+    has_district = find_column(
+        dataframe, POPULATION_COLUMN_ALIASES["district_name"]
+    )
+    has_population = find_column(
+        dataframe, POPULATION_COLUMN_ALIASES["population"]
+    )
+    if has_district is None or has_population is None:
+        raise FileNotFoundError(
+            f"ไฟล์ Population ใน Data Lake ไม่มีคอลัมน์เขตและประชากร: {path_glob}"
+        )
+
+    return dataframe.withColumn("_source_file", F.input_file_name())
 
 
 def _flatten_nested_records(dataframe: DataFrame) -> DataFrame:
@@ -138,7 +206,9 @@ def read_population_files(
         frames.append(frame)
 
     if not frames:
-        raise ValueError(
+        # FileNotFoundError so --allow-missing-population also covers a
+        # reference folder that only holds non-district files (e.g. Bueng Kum xlsx).
+        raise FileNotFoundError(
             "ไม่พบไฟล์ Population Reference ที่มีคอลัมน์เขตและประชากร"
         )
 
@@ -165,7 +235,7 @@ def _read_csv_with_fallback(path: Path) -> pd.DataFrame:
 
 
 def _extract_year_from_filename(path: Path):
-    """ดึงปี พ.ศ. จากชื่อไฟล์ เช่น ประชากรและครัวเรือน_2568.csv"""
+    """ดึงปี พ.ศ. จากชื่อไฟล์ เช่น population_summary_2568.csv"""
 
     import re
 

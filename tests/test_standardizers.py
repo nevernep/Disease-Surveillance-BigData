@@ -1,6 +1,7 @@
 from pyspark.sql import functions as F
 
 from spark.standardizers import (
+    age_group_key,
     standardize_disease,
     standardize_district,
     standardize_sex,
@@ -26,7 +27,10 @@ def test_standardize_district(spark):
 
 def test_standardize_disease(spark):
     data = spark.createDataFrame(
-        [("โรคไข้เลือดออก",), ("Dengue Fever",), ("COVID-19",)],
+        [
+            ("โรคไข้เลือดออก",), ("Dengue Fever",), ("COVID-19",),
+            ("โควิด-19 (COVID-19)",),
+        ],
         ["raw"],
     )
 
@@ -38,7 +42,33 @@ def test_standardize_disease(spark):
         "ไข้เลือดออก",
         "ไข้เลือดออก",
         "โควิด-19",
+        "โควิด-19",
     ]
+
+
+def test_standardize_diarrhea_across_years(spark):
+    data = spark.createDataFrame(
+        [("อุจจาระร่วง",), ("โรคอุจจาระร่วงเฉียบพลัน",), ("อุจจาระร่วงเฉียบพลัน",)],
+        ["raw"],
+    )
+
+    results = data.select(
+        standardize_disease(F.col("raw")).alias("value")
+    ).collect()
+
+    assert {row["value"] for row in results} == {"อุจจาระร่วงเฉียบพลัน"}
+
+
+def test_standardize_pneumonia(spark):
+    data = spark.createDataFrame(
+        [("โรคปอดบวม",), ("ปอดอักเสบ",), ("Pneumonia",)], ["raw"]
+    )
+
+    results = data.select(
+        standardize_disease(F.col("raw")).alias("value")
+    ).collect()
+
+    assert {row["value"] for row in results} == {"ปอดบวม"}
 
 
 def test_standardize_sex(spark):
@@ -51,3 +81,14 @@ def test_standardize_sex(spark):
     ).collect()
 
     assert [row["value"] for row in results] == ["M", "F", "U"]
+
+
+def test_age_group_key_boundaries(spark):
+    data = spark.createDataFrame(
+        [(0.0,), (4.0,), (5.0,), (14.0,), (15.0,), (64.0,), (65.0,), (98.0,), (None,)],
+        "age double",
+    )
+
+    results = data.select(age_group_key(F.col("age")).alias("key")).collect()
+
+    assert [row["key"] for row in results] == [1, 1, 2, 3, 4, 8, 9, 9, 10]

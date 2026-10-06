@@ -31,7 +31,7 @@ def main() -> int:
     ).resolve()
     for year in (2568, 2569):
         validate_file(
-            reference / f"ประชากรและครัวเรือน_{year}.csv",
+            reference / f"population_summary_{year}.csv",
             year,
         )
     return 0

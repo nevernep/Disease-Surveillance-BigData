@@ -23,8 +23,10 @@ from spark.population import (
     fill_missing_years,
 )
 from spark.readers import (
+    read_disease_from_lake,
     read_disease_json,
     read_population_files,
+    read_population_from_lake,
 )
 from spark.standardizers import standardize_disease_data
 from spark.warehouse import build_warehouse_tables
@@ -42,41 +44,51 @@ def run_pipeline(
     fail_on_dq: bool,
     allow_missing_population: bool = False,
 ) -> int:
-    paths = ProjectPaths(root=project_root)
     settings = Settings.from_env(project_root)
+    paths = ProjectPaths(root=project_root, lake_uri=settings.data_lake_uri)
     spark = create_spark_session(settings)
 
     try:
-        print("[1/9] อ่านข้อมูลผู้ป่วยจากไฟล์ JSON")
-        raw_disease = read_disease_json(spark, paths.raw_disease_dir)
+        if paths.lake_uri:
+            print(f"[1/10] อ่านข้อมูลผู้ป่วยจาก Data Lake: {paths.lake_raw_disease_glob}")
+            raw_disease = read_disease_from_lake(spark, paths.lake_raw_disease_glob)
+        else:
+            print("[1/10] อ่านข้อมูลผู้ป่วยจากไฟล์ JSON ในเครื่อง")
+            raw_disease = read_disease_json(spark, paths.raw_disease_dir)
         raw_disease.cache()
 
-        print("[2/9] แปลงเป็น Canonical Schema")
+        print("[2/10] แปลงเป็น Canonical Schema")
         canonical = canonicalize_disease_data(raw_disease)
 
-        print("[3/9] ทำความสะอาดข้อมูล")
+        print("[3/10] ทำความสะอาดข้อมูล")
         quarantine = quarantine_disease_data(canonical, settings)
         cleaned = clean_disease_data(canonical, settings)
         write_parquet_directory(quarantine, paths.quarantine_dir)
 
-        print("[4/9] ตรวจและลบข้อมูลซ้ำ")
+        print("[4/10] ตรวจและลบข้อมูลซ้ำ")
         deduplicated, removed_rows = deduplicate_cases(cleaned)
         deduplicated.cache()
         print(f"      ตัดข้อมูลซ้ำออก {removed_rows} แถว")
 
         write_parquet_directory(deduplicated, paths.clean_dir)
 
-        print("[5/9] Standardize ชื่อเขตและชื่อโรค")
+        print("[5/10] Standardize ชื่อเขตและชื่อโรค")
         standardized = standardize_disease_data(deduplicated)
         standardized.cache()
 
         write_parquet_directory(standardized, paths.standardized_dir)
 
-        print("[6/9] เตรียมข้อมูลประชากร")
+        print("[6/10] เตรียมข้อมูลประชากร")
+        population_available = True
         try:
-            raw_population = read_population_files(
-                spark, paths.raw_reference_dir
-            )
+            if paths.lake_uri:
+                raw_population = read_population_from_lake(
+                    spark, paths.lake_raw_population_glob
+                )
+            else:
+                raw_population = read_population_files(
+                    spark, paths.raw_reference_dir
+                )
             population = canonicalize_population_data(
                 raw_population, settings
             )
@@ -85,6 +97,7 @@ def run_pipeline(
             if not allow_missing_population:
                 raise
             print("      ไม่พบ Population: ทำ Dashboard จำนวนผู้ป่วยเท่านั้น")
+            population_available = False
             population = (
                 standardized
                 .select("year_be", "district_name")
@@ -93,7 +106,7 @@ def run_pipeline(
             )
         population.cache()
 
-        print("[7/9] สร้าง Gold Layer และคำนวณ Incidence Rate")
+        print("[7/10] สร้าง Gold Layer และคำนวณ Incidence Rate")
         curated = build_curated_dataset(standardized, population)
         curated.cache()
 
@@ -101,7 +114,7 @@ def run_pipeline(
         write_parquet_directory(curated, paths.gold_parquet)
 
         print("[8/10] สร้าง Data Warehouse Star Schema")
-        warehouse_tables = build_warehouse_tables(curated)
+        warehouse_tables = build_warehouse_tables(standardized, population)
         write_warehouse_tables(warehouse_tables, paths)
 
         print("[9/10] ตรวจสอบคุณภาพข้อมูล")
@@ -114,13 +127,17 @@ def run_pipeline(
             curated=curated,
             removed_duplicates=removed_rows,
             settings=settings,
+            population_available=population_available,
+            warehouse=warehouse_tables,
         )
 
         report.show(truncate=False)
         write_quality_report(report, paths.quality_csv)
         write_error_log(report, paths.error_log_csv)
+        write_parquet_directory(report.coalesce(1), paths.quality_parquet)
 
         print("[10/10] เสร็จสิ้น")
+        print(f"      Data Lake     : {paths.lake_uri or '(local mode)'}")
         print(f"      Gold CSV      : {paths.gold_csv}")
         print(f"      Warehouse     : {paths.warehouse_dir}")
         print(f"      Gold Parquet  : {paths.gold_parquet}")

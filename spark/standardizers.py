@@ -5,9 +5,11 @@ from pyspark.sql import Column, DataFrame
 from pyspark.sql import functions as F
 
 from spark.schemas import (
+    AGE_GROUPS,
     DISEASE_ALIASES,
     DISTRICT_ALIASES,
     SEX_ALIASES,
+    UNKNOWN_AGE_GROUP_KEY,
 )
 
 
@@ -73,6 +75,27 @@ def standardize_sex(column: Column) -> Column:
     return F.coalesce(F.element_at(mapping, key), F.lit("U"))
 
 
+def age_group_key(column: Column) -> Column:
+    """จัดอายุ (ปีเต็ม) เข้ากลุ่มตาม AGE_GROUPS; ไม่มีอายุ = ไม่ระบุ"""
+
+    age = F.floor(column.cast("double"))
+    expression = None
+
+    for key, _label, minimum, maximum in AGE_GROUPS:
+        if minimum is None:
+            continue
+        condition = age >= minimum
+        if maximum is not None:
+            condition = condition & (age <= maximum)
+        expression = (
+            F.when(condition, F.lit(key))
+            if expression is None
+            else expression.when(condition, F.lit(key))
+        )
+
+    return expression.otherwise(F.lit(UNKNOWN_AGE_GROUP_KEY)).cast("int")
+
+
 def standardize_disease_data(dataframe: DataFrame) -> DataFrame:
     """สร้างคอลัมน์มาตรฐานจากคอลัมน์ raw"""
 
@@ -87,6 +110,7 @@ def standardize_disease_data(dataframe: DataFrame) -> DataFrame:
             standardize_disease(F.col("disease_name_raw")),
         )
         .withColumn("sex", standardize_sex(F.col("sex")))
+        .withColumn("age_group_key", age_group_key(F.col("age")))
         .filter(F.length(F.trim(F.col("district_name"))) > 0)
         .filter(F.length(F.trim(F.col("disease_name"))) > 0)
     )

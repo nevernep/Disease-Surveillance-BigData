@@ -25,8 +25,11 @@ DISTRICT_COLUMN_ALIASES = {
 }
 POPULATION_COLUMN_ALIASES = {
     "ประชากรรวม", "ประชากรทั้งหมด", "จำนวนประชากร", "ประชากร",
-    "total_population", "population",
+    "total_population", "population", "total",
 }
+CSV_ENCODINGS = ("utf-8-sig", "cp874")
+# A Thai above/below vowel or tone mark typed twice in a row.
+THAI_DOUBLED_MARK = r"([ัิ-ฺ็-๎])\1+"
 SUBDISTRICT_COLUMN_ALIASES = {"แขวง", "ชื่อตำบล", "subdistrict"}
 
 
@@ -35,17 +38,33 @@ def _clean_name(value: object) -> str:
 
 
 def _find_column(columns: Iterable[object], aliases: set[str]) -> str | None:
-    normalized = {_clean_name(column): str(column) for column in columns}
+    """Case-insensitive match, e.g. "District" / "TOTAL" in official CSVs."""
+    normalized = {_clean_name(column).lower(): str(column) for column in columns}
     for alias in aliases:
-        if alias in normalized:
-            return normalized[alias]
+        if alias.lower() in normalized:
+            return normalized[alias.lower()]
     return None
+
+
+def _read_csv_bytes(content: bytes) -> pd.DataFrame:
+    """Official CSVs come as UTF-8 (BOM) or Thai Windows-874."""
+    for encoding in CSV_ENCODINGS:
+        try:
+            return pd.read_csv(io.BytesIO(content), encoding=encoding, dtype=str)
+        except UnicodeDecodeError:
+            continue
+    raise ValueError(f"Unsupported CSV encoding; tried {CSV_ENCODINGS}")
 
 
 def _normalize_district(value: object) -> str:
     district = _clean_name(value)
     district = re.sub(r"^(เขต|ข\.?)\s*", "", district)
     district = re.sub(r"\s*(กรุงเทพมหานคร|กรุงเทพฯ|กทม\.?)$", "", district)
+    # Common Thai typing errors seen in official files: "เเ" typed for "แ",
+    # a doubled vowel/tone mark ("วัังทองหลาง"), a space inside the name.
+    district = district.replace("เเ", "แ")
+    district = re.sub(THAI_DOUBLED_MARK, r"\1", district)
+    district = re.sub(r"\s+", "", district)
     aliases = {
         "ป้อมปราบฯ": "ป้อมปราบศัตรูพ่าย",
         "ป้อมปราบ": "ป้อมปราบศัตรูพ่าย",
@@ -59,7 +78,7 @@ def _read_source(source: str) -> pd.DataFrame:
     if path.is_file():
         if path.suffix.lower() in {".xlsx", ".xls"}:
             return pd.read_excel(path)
-        return pd.read_csv(path, encoding="utf-8-sig")
+        return _read_csv_bytes(path.read_bytes())
 
     response = requests.get(source, timeout=60)
     response.raise_for_status()
@@ -68,7 +87,7 @@ def _read_source(source: str) -> pd.DataFrame:
         (".xlsx", ".xls")
     ):
         return pd.read_excel(io.BytesIO(response.content))
-    return pd.read_csv(io.BytesIO(response.content), encoding="utf-8-sig")
+    return _read_csv_bytes(response.content)
 
 
 def prepare_year(source: str, year: int) -> pd.DataFrame:
@@ -115,8 +134,11 @@ def prepare_year(source: str, year: int) -> pd.DataFrame:
     selected = selected[["ปี", "เขต", "ประชากรรวม"]]
     selected = selected.dropna(subset=["ปี", "เขต", "ประชากรรวม"])
     selected = selected[selected["เขต"] != ""]
+    # Total rows: "รวม", "ยอดรวม", and the source typo "ยอรวม". No Bangkok
+    # district name contains "รวม".
     selected = selected[
-        ~selected["เขต"].str.lower().isin({"รวม", "ทั้งหมด", "total"})
+        ~selected["เขต"].str.contains("รวม", regex=False)
+        & ~selected["เขต"].str.lower().isin({"ทั้งหมด", "total"})
     ]
     selected = selected[selected["ประชากรรวม"] > 0]
 
@@ -176,14 +198,21 @@ def main() -> int:
         description="Aggregate and validate Bangkok population reference data"
     )
     parser.add_argument("--project-root", type=Path, default=Path("."))
-    parser.add_argument("--source-2568", required=True)
-    parser.add_argument("--source-2569", required=True)
+    parser.add_argument("--source-2568", help="Official CSV/XLSX path or URL")
+    parser.add_argument("--source-2569", help="Official CSV/XLSX path or URL")
     parser.add_argument(
         "--overwrite",
         action="store_true",
         help="Replace output files explicitly; default is refuse-to-overwrite",
     )
     args = parser.parse_args()
+    sources = {
+        year: source
+        for year, source in ((2568, args.source_2568), (2569, args.source_2569))
+        if source
+    }
+    if not sources:
+        parser.error("give at least one of --source-2568 / --source-2569")
 
     reference = (
         args.project_root / "data" / "raw" / "disease" / "reference"
@@ -192,15 +221,9 @@ def main() -> int:
         2568: reference / "population_summary_2568.csv",
         2569: reference / "population_summary_2569.csv",
     }
-    prepared = {
-        year: prepare_year(source, year)
-        for year, source in (
-            (2568, args.source_2568),
-            (2569, args.source_2569),
-        )
-    }
-    if not args.overwrite and any(path.exists() for path in outputs.values()):
-        existing = [str(path) for path in outputs.values() if path.exists()]
+    prepared = {year: prepare_year(source, year) for year, source in sources.items()}
+    if not args.overwrite and any(outputs[year].exists() for year in prepared):
+        existing = [str(outputs[year]) for year in prepared if outputs[year].exists()]
         raise FileExistsError(
             "Refusing to overwrite existing output(s): " + ", ".join(existing)
         )

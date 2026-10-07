@@ -113,3 +113,18 @@ def test_age_group_key_boundaries(spark):
     results = data.select(age_group_key(F.col("age")).alias("key")).collect()
 
     assert [row["key"] for row in results] == [1, 1, 2, 3, 4, 8, 9, 9, 10]
+
+
+def test_standardize_district_fixes_thai_typing_errors(spark):
+    data = spark.createDataFrame(
+        [("เขตดินเเดง",), ("วัังทองหลาง",), ("ป้อมปราบ ศัตรูพ่าย",), ("บางเเค",)],
+        ["raw"],
+    )
+
+    results = data.select(
+        standardize_district(F.col("raw")).alias("value")
+    ).collect()
+
+    assert [row["value"] for row in results] == [
+        "ดินแดง", "วังทองหลาง", "ป้อมปราบศัตรูพ่าย", "บางแค",
+    ]

@@ -38,6 +38,7 @@ def run_quality_checks(
     population_available: bool = True,
     warehouse: Optional[Dict[str, DataFrame]] = None,
     quarantine: Optional[DataFrame] = None,
+    population_filled_years: Optional[List[int]] = None,
 ) -> Tuple[DataFrame, bool]:
     """ตรวจกฎคุณภาพข้อมูลทั้งหมดและคืนผลเป็น DataFrame"""
 
@@ -244,6 +245,15 @@ def run_quality_checks(
     ]
 
     checks.append(_raw_duplicate_check(raw, raw_rows))
+
+    if population_available:
+        # A year without its own population file borrows the latest year's;
+        # its incidence rate is an approximation and must be labelled as such.
+        checks.append(QualityCheck(
+            "gold", "population_years_filled_from_latest",
+            ", ".join(str(year) for year in population_filled_years or []) or "none",
+            "informational", "PASS",
+        ))
 
     if quarantine is not None:
         checks.extend(_quarantine_reason_checks(quarantine))

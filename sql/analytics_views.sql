@@ -6,7 +6,20 @@
 --     scope), never from districts that happened to report a case;
 --   * a Bangkok-wide rate is shown only when all Bangkok districts have
 --     population for that year; otherwise it is NULL (no partial denominators);
---   * rates are not split by age group or sex: population by age/sex is not loaded.
+--   * rates are not split by age group or sex: population by age/sex is not loaded;
+--   * yearly rates are CUMULATIVE over the months that have data in that year
+--     (months_covered / period_label), not annual rates: compare years only
+--     over matching months.
+
+-- Drop first so a view's columns can change shape (CREATE OR REPLACE cannot).
+DROP VIEW IF EXISTS
+    mart.vw_disease_overview,
+    mart.vw_monthly_trend,
+    mart.vw_year_disease,
+    mart.vw_district_disease_year,
+    mart.vw_year_period,
+    mart.vw_district_ranking,
+    mart.vw_demographics;
 
 -- Case-level analytical view (all dimensions resolved to labels).
 CREATE OR REPLACE VIEW mart.vw_disease_overview AS
@@ -47,7 +60,23 @@ LEFT JOIN mart.fact_disease_cases AS f
    AND f.disease_key = dse.disease_key
 GROUP BY d.month_start, d.month_label, d.year_be, dse.disease_name;
 
--- Bangkok-wide yearly totals and incidence per disease.
+-- Months with data per year (dim_date runs from the first to the last onset month).
+CREATE OR REPLACE VIEW mart.vw_year_period AS
+SELECT
+    year_be,
+    COUNT(*) AS months_covered,
+    MIN(month_label) FILTER (WHERE month_start = first_month)
+        || ' – ' ||
+    MIN(month_label) FILTER (WHERE month_start = last_month) AS period_label
+FROM (
+    SELECT d.*,
+           MIN(month_start) OVER (PARTITION BY year_be) AS first_month,
+           MAX(month_start) OVER (PARTITION BY year_be) AS last_month
+    FROM mart.dim_date AS d
+) AS months
+GROUP BY year_be;
+
+-- Bangkok-wide cumulative cases and incidence per disease and year.
 CREATE OR REPLACE VIEW mart.vw_year_disease AS
 WITH cases AS (
     SELECT d.year_be, f.disease_key,
@@ -71,6 +100,8 @@ bangkok AS (
 SELECT
     c.year_be,
     c.year_be - 543 AS year_ce,
+    yp.months_covered,
+    yp.period_label,
     dse.disease_name,
     c.total_cases,
     c.source_records,
@@ -79,16 +110,19 @@ SELECT
     CASE
         WHEN p.districts_with_population = b.districts AND p.population > 0
         THEN ROUND(c.total_cases * 100000.0 / p.population, 2)
-    END AS incidence_rate_per_100k
+    END AS cumulative_incidence_per_100k
 FROM cases AS c
 JOIN mart.dim_disease AS dse ON dse.disease_key = c.disease_key
+JOIN mart.vw_year_period AS yp ON yp.year_be = c.year_be
 CROSS JOIN bangkok AS b
 LEFT JOIN population AS p ON p.year_be = c.year_be;
 
--- Yearly cases and incidence per district and disease (district denominator).
+-- Cumulative cases and incidence per year, district and disease (district denominator).
 CREATE OR REPLACE VIEW mart.vw_district_disease_year AS
 SELECT
     d.year_be,
+    yp.months_covered,
+    yp.period_label,
     dst.district_name,
     dse.disease_name,
     SUM(f.total_cases) AS total_cases,
@@ -96,15 +130,17 @@ SELECT
     CASE
         WHEN p.population > 0
         THEN ROUND(SUM(f.total_cases) * 100000.0 / p.population, 2)
-    END AS incidence_rate_per_100k
+    END AS cumulative_incidence_per_100k
 FROM mart.fact_disease_cases AS f
 JOIN mart.dim_date     AS d   ON d.date_key = f.date_key
+JOIN mart.vw_year_period AS yp ON yp.year_be = d.year_be
 JOIN mart.dim_district AS dst ON dst.district_key = f.district_key
 JOIN mart.dim_disease  AS dse ON dse.disease_key = f.disease_key
 LEFT JOIN mart.fact_population AS p
     ON p.year_be = d.year_be
    AND p.district_key = f.district_key
-GROUP BY d.year_be, dst.district_name, dse.disease_name, p.population;
+GROUP BY d.year_be, yp.months_covered, yp.period_label,
+         dst.district_name, dse.disease_name, p.population;
 
 CREATE OR REPLACE VIEW mart.vw_district_ranking AS
 SELECT

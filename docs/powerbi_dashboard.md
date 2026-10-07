@@ -1,5 +1,8 @@
 # Power BI Dashboard
 
+> No Power BI Desktop? Use the web workflow in
+> [powerbi_web_guide.md](powerbi_web_guide.md) (Excel export → Power BI Service).
+
 ## 1. Data source
 
 The `spark_processing` DAG loads the star schema into the PostgreSQL Data
@@ -13,7 +16,11 @@ Power BI to it:
 | Database | `surveillance_dw` |
 | Credentials | Database: `dw_user` / `warehouse-local-only` (from `.env`) |
 | Tables | `mart.dim_date`, `mart.dim_district`, `mart.dim_disease`, `mart.dim_age_group`, `mart.dim_sex`, `mart.fact_disease_cases`, `mart.fact_population` |
-| Optional views | `mart.vw_monthly_trend`, `mart.vw_year_disease`, `mart.vw_district_disease_year`, `mart.vw_district_ranking`, `mart.vw_demographics`, `mart.vw_disease_overview` |
+| Optional views | `mart.vw_monthly_trend`, `mart.vw_year_disease`, `mart.vw_district_disease_year`, `mart.vw_district_ranking`, `mart.vw_demographics`, `mart.vw_disease_overview`, `mart.vw_year_period` |
+
+Yearly views expose `cumulative_incidence_per_100k` together with
+`months_covered` and `period_label`: the rate is cumulative over the months
+with data in that year (2568: 7 months, 2569: 9 months), not an annual rate.
 
 Use **Import** mode for this dataset size. Refresh in Power BI after the DAG
 finishes. `mart.load_audit` records when each load happened and its row counts.

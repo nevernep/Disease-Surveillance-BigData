@@ -43,7 +43,11 @@ def standardize_district(column: Column) -> Column:
         r"\s*(กรุงเทพมหานคร|กรุงเทพฯ|กทม\.?)$",
         "",
     )
-    value = F.trim(value)
+    # Common Thai typing errors: "เเ" for "แ", a doubled vowel/tone mark,
+    # a space inside the name (no Bangkok district name contains a space).
+    value = F.regexp_replace(value, "เเ", "แ")
+    value = F.regexp_replace(value, r"([ัิ-ฺ็-๎])\1+", "$1")
+    value = F.regexp_replace(value, r"\s+", "")
 
     mapping = _mapping_expression(DISTRICT_ALIASES)
 

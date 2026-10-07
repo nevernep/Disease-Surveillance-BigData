@@ -196,16 +196,24 @@ s3://disease-surveillance/
 ### 2. Population Reference
 
 - **Excel เขตบึงกุ่ม** (3 แขวง ปี 2568–2569) ใช้เป็น reference และตรวจการอ่านไฟล์เท่านั้น เพราะไม่ครอบคลุมทั้งกรุงเทพฯ
-- **Population 50 เขต** (`population_summary_{ปี}.csv`: `ปี,เขต,ประชากรรวม`) จำเป็นต่อการคำนวณ incidence rate **ยังไม่มีในโปรเจกต์** ต้องเตรียมจากแหล่งทางการด้วย:
+- **Population 50 เขต** (`data/raw/disease/reference/population_summary_{ปี}.csv`: `ปี,เขต,ประชากรรวม`) ใช้เป็นตัวหารของ incidence rate
+
+| ปี | สถานะ | แหล่งข้อมูล |
+|---|---|---|
+| 2569 | ✅ `population_summary_2569.csv` 50 เขต รวม 5,408,167 คน | สำนักงานปกครองและทะเบียน กทม. ข้อมูล ณ มิ.ย. 2569 (data.bangkok.go.th) |
+| 2568 | ⏳ ยังไม่มีไฟล์ทางการ Spark ใช้ปี 2569 แทน และ DQ ติดป้าย `population_years_filled_from_latest` | ระบบสถิติของกรมการปกครองไม่อนุญาตให้ดึงข้อมูลอัตโนมัติ |
+
+แหล่งที่มา วันที่อ้างอิง และชื่อเขตที่แก้ไข บันทึกไว้ใน [`data/raw/disease/reference/SOURCES.md`](data/raw/disease/reference/SOURCES.md)
+ถ้าจะเพิ่มหรือแทนที่ไฟล์ (เช่น ปี 2568 จาก stat.bora.dopa.go.th) ให้ใช้:
 
 ```powershell
-python -m spark.prepare_population_reference --project-root . `
-  --source-2568 "<ไฟล์หรือ URL ทางการ ปี 2568>" `
-  --source-2569 "<ไฟล์หรือ URL ทางการ ปี 2569>"
+python -m spark.prepare_population_reference --project-root . --source-2568 "<ไฟล์หรือ URL ทางการ>"
 python -m spark.validate_population_reference --project-root .
 ```
 
-สคริปต์ไม่สร้างตัวเลขขึ้นเอง และจะไม่เขียนทับไฟล์เดิมถ้าไม่ระบุ `--overwrite` เมื่อมีไฟล์แล้วให้ตั้ง `REQUIRE_POPULATION=true`
+สคริปต์รับไฟล์ CSV (UTF-8 หรือ Windows-874) และ XLSX แก้ชื่อเขตที่พิมพ์ผิดแบบที่พบบ่อย
+(เช่น `เเ` แทน `แ`, วรรณยุกต์ซ้ำ, ช่องว่างกลางชื่อ) ตัดแถวยอดรวม แล้วตรวจว่าครบ 50 เขตพอดี
+สคริปต์ไม่สร้างตัวเลขขึ้นเอง และจะไม่เขียนทับไฟล์เดิมถ้าไม่ระบุ `--overwrite`
 
 ---
 
@@ -219,9 +227,21 @@ python -m spark.validate_population_reference --project-root .
 | `dim_district` | ครบ 50 เขตเสมอ |
 | `dim_disease`, `dim_age_group`, `dim_sex` | |
 
-Views: `vw_monthly_trend`, `vw_year_disease`, `vw_district_disease_year`, `vw_district_ranking`, `vw_demographics`, `vw_disease_overview`
+Views: `vw_monthly_trend`, `vw_year_disease`, `vw_district_disease_year`, `vw_district_ranking`, `vw_demographics`, `vw_disease_overview`, `vw_year_period`
 
-`load_warehouse` ทำงานใน transaction เดียว (DDL → COPY → ตรวจจำนวนแถว → views → `load_audit`) ถ้าล้มจะ rollback ข้อมูลเดิมไม่เสียหาย วิธีต่อ Power BI อยู่ที่ [docs/powerbi_dashboard.md](docs/powerbi_dashboard.md)
+ใน view รายปี `cumulative_incidence_per_100k` เป็น**อัตราสะสมตามช่วงที่มีข้อมูล** และมีคอลัมน์ `months_covered`
+กับ `period_label` (เช่น "มิ.ย. 2568 – ธ.ค. 2568", 7 เดือน) กำกับไว้ ไม่ใช่อัตราทั้งปี
+
+`load_warehouse` ทำงานใน transaction เดียว (DDL → COPY → ตรวจจำนวนแถว → views → `load_audit`) ถ้าล้มจะ rollback ข้อมูลเดิมไม่เสียหาย
+
+### Power BI
+
+- **Power BI บนเว็บ (ไม่ต้องใช้ Desktop)**: export warehouse เป็นไฟล์ Excel แล้วทำตาม [docs/powerbi_web_guide.md](docs/powerbi_web_guide.md)
+  ```powershell
+  docker compose exec airflow bash -c "cd /opt/airflow/project && python -m spark.export_powerbi"
+  # → data/processed/powerbi/disease_surveillance_powerbi.xlsx
+  ```
+- **Power BI Desktop**: ต่อ PostgreSQL `localhost:5433` ตรง ดู [docs/powerbi_dashboard.md](docs/powerbi_dashboard.md)
 
 ---
 
@@ -264,6 +284,7 @@ docker compose exec airflow bash -c "cd /opt/airflow/project && python -m pytest
 - **ช่วงเวลาไม่ครบปี**: ปี 2568 เริ่ม มิ.ย. 2025 จึงห้ามเทียบยอดรวมทั้งปี 2568 กับ 2569 ตรง ๆ ให้เทียบรายเดือนที่ตรงกัน
 - **ไข้เลือดออก** ปี 2569 รวม DF + DHF + DSS (ไข้เลือดออกรวม) เพื่อให้เทียบกับปี 2568 ได้
 - **Incidence rate** แสดงเฉพาะเมื่อมีข้อมูลประชากรครบ 50 เขต และไม่คำนวณแยกตามอายุ/เพศ (ไม่มีประชากรแยกอายุ/เพศ)
+- **ตัวหารคือประชากรตามทะเบียนราษฎร** เขตชั้นในที่มีประชากรแฝงมาก (เช่น วัฒนา ห้วยขวาง ราชเทวี) อาจมีอัตราสูงเกินจริง และปี 2568 ใช้ประชากร มิ.ย. 2569 แทน
 - **ชื่อโรคต่างกันระหว่างปี** เช่น `อุจจาระร่วง` (2568) กับ `โรคอุจจาระร่วงเฉียบพลัน` (2569) ถูกรวมเป็น `อุจจาระร่วงเฉียบพลัน` ใน Spark โดยไม่แก้ Raw
 
 ---
@@ -298,10 +319,11 @@ Raw Data ต้องคงค่าตามต้นทาง ห้ามเ�
 | Raw zone บน Data Lake + Airflow | ✅ ใช้งานได้ |
 | Spark อ่าน/เขียนผ่าน Data Lake + DQ | ✅ ใช้งานได้ |
 | PostgreSQL Warehouse + views | ✅ ใช้งานได้ |
-| Unit tests | ✅ 53 tests |
-| ข้อมูลประชากร 50 เขต (incidence rate) | ⏳ รอแหล่งข้อมูลทางการ — ปัจจุบันรันแบบ cases-only |
+| Unit tests | ✅ 57 tests |
+| ข้อมูลประชากร 50 เขต (incidence rate) | ✅ ปี 2569 (มิ.ย. 2569) / ⏳ ปี 2568 ใช้ปี 2569 แทนจนกว่าจะได้ไฟล์ทางการ |
 | ข้อมูลเต็ม (473,529 records, มิ.ย. 2025 – ก.ย. 2026) | ✅ รันผ่านทั้ง pipeline |
-| ไฟล์รายงาน Power BI (.pbix) | ⏳ ต้องสร้างใน Power BI Desktop ตาม `powerbi/report_layout.md` |
+| ไฟล์ Excel สำหรับ Power BI | ✅ `spark/export_powerbi.py` |
+| รายงาน Power BI | ⏳ กำลังทำบน Power BI Service ตาม [docs/powerbi_web_guide.md](docs/powerbi_web_guide.md) |
 
 ---
 
@@ -310,7 +332,8 @@ Raw Data ต้องคงค่าตามต้นทาง ห้ามเ�
 - [docs/data_sources.md](docs/data_sources.md) — แหล่งข้อมูลและผล profiling
 - [docs/data_contract.md](docs/data_contract.md) — schema และข้อตกลงระหว่างแต่ละ Part
 - [docs/data_lake_airflow.md](docs/data_lake_airflow.md) — การใช้งาน Data Lake/Airflow/Spark และการแก้ปัญหา
-- [docs/powerbi_dashboard.md](docs/powerbi_dashboard.md) — การเชื่อมต่อ Power BI, model และ measures
+- [docs/powerbi_web_guide.md](docs/powerbi_web_guide.md) — ทำรายงาน Power BI บนเว็บทีละขั้น (ไม่ต้องใช้ Desktop)
+- [docs/powerbi_dashboard.md](docs/powerbi_dashboard.md) — การเชื่อมต่อ Power BI Desktop กับ PostgreSQL, model และ measures
 
 ---
 

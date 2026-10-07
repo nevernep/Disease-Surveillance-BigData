@@ -81,6 +81,7 @@ def run_pipeline(
 
         print("[6/10] เตรียมข้อมูลประชากร")
         population_available = True
+        population_filled_years: list = []
         try:
             if paths.lake_uri:
                 raw_population = read_population_from_lake(
@@ -93,6 +94,20 @@ def run_pipeline(
             population = canonicalize_population_data(
                 raw_population, settings
             )
+            loaded_years = {
+                row["year_be"]
+                for row in population.select("year_be").distinct().collect()
+            }
+            population_filled_years = sorted(
+                row["year_be"]
+                for row in standardized.select("year_be").distinct().collect()
+                if row["year_be"] not in loaded_years
+            )
+            if population_filled_years:
+                print(
+                    f"      ไม่มีประชากรปี {population_filled_years}: "
+                    f"ใช้ปีล่าสุดที่มี ({max(loaded_years)}) แทน"
+                )
             population = fill_missing_years(population, standardized)
         except FileNotFoundError:
             if not allow_missing_population:
@@ -131,6 +146,7 @@ def run_pipeline(
             population_available=population_available,
             warehouse=warehouse_tables,
             quarantine=quarantine,
+            population_filled_years=population_filled_years,
         )
 
         report.show(truncate=False)

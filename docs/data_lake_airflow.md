@@ -66,12 +66,10 @@ python -m spark.prepare_population_reference `
 python -m spark.validate_population_reference --project-root .
 ```
 
-ผลลัพธ์จะถูกสร้างเป็น:
-
-```text
-data/raw/disease/reference/population_summary_2568.csv
-data/raw/disease/reference/population_summary_2569.csv
-```
+ผลลัพธ์จะถูกสร้างเป็น `data/raw/disease/reference/population_summary_{ปี}.csv`
+(ตอนนี้มีเฉพาะปี 2569 ดูแหล่งที่มาใน `data/raw/disease/reference/SOURCES.md`)
+ถ้าปีไหนไม่มีไฟล์ task `land_population_{ปี}` จะถูกข้าม และ Spark จะใช้ประชากรปีล่าสุดแทน
+โดย DQ ติดป้าย `population_years_filled_from_latest`
 
 ถ้าต้องการแทนที่ไฟล์ผลลัพธ์เดิม ต้องระบุ `--overwrite` อย่างชัดเจน
 และควรเก็บไฟล์ต้นทางกับ URL/วันที่ดาวน์โหลดไว้เป็นหลักฐานนอก Raw output

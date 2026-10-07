@@ -29,11 +29,16 @@ def main() -> int:
     reference = (
         args.project_root / "data" / "raw" / "disease" / "reference"
     ).resolve()
+    found = 0
     for year in (2568, 2569):
-        validate_file(
-            reference / f"population_summary_{year}.csv",
-            year,
-        )
+        path = reference / f"population_summary_{year}.csv"
+        if not path.is_file():
+            print(f"MISSING: {path} (year {year} will use the latest available year)")
+            continue
+        validate_file(path, year)
+        found += 1
+    if found == 0:
+        raise FileNotFoundError(f"No population_summary_*.csv in {reference}")
     return 0
 
 

@@ -79,11 +79,12 @@ Data.go.th API → Raw JSON → Data Lake (S3) → Airflow → Spark (Clean/DQ) 
 # 1) ตั้งค่า: คัดลอกค่าตั้งต้นแล้วใส่ DATA_GO_TH_TOKEN (ห้าม commit .env)
 Copy-Item .env.example .env
 
-# 2) ดึงข้อมูลตัวอย่างจาก API (ปีละ 100 records)
+# 2) ดึงข้อมูล: ไฟล์เต็ม (ปีละ 1 คำขอ ~80–90 MB) หรือ sample 100 records/ปี
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-python src\extract\extract_disease.py
+python src\extract\extract_disease.py --full   # ข้อมูลเต็ม (แนะนำ)
+python src\extract\extract_disease.py          # หรือ sample จาก API
 
 # 3) เปิดระบบ
 docker compose up -d --build
@@ -185,7 +186,10 @@ s3://disease-surveillance/
 | 2569 | 2026 | 193,866 |
 | **รวม** | | **427,947** |
 
-ช่วงพัฒนาใช้ตัวอย่างปีละ 100 records (`offset=0`) ข้อมูลมี 16 fields เช่น `ชื่อกลุ่มโรค`, `อายุ (เต็ม) ปี`, `เพศ`, `จังหวัด`, `อำเภอ/เขต`, `ตำบล/แขวง`, `วันที่เริ่มป่วย` ดูทั้งหมดที่ [docs/data_sources.md](docs/data_sources.md)
+ข้อมูลเต็มดาวน์โหลดเป็นไฟล์ CSV ต้นฉบับ (15 fields, วันที่ `D/M/YYYY`) ปีละ 1 คำขอ ปัจจุบันมี
+234,081 (2568, มิ.ย.–ธ.ค. 2025) + 239,448 (2569, ม.ค.–ก.ย. 2026) = **473,529 records**
+ถ้ามีทั้งไฟล์เต็มและ sample ของปีเดียวกัน ระบบใช้ไฟล์เต็ม ส่วน sample จาก Data API (100 records แรก)
+มี 16 fields เช่น `ชื่อกลุ่มโรค`, `อายุ (เต็ม) ปี`, `เพศ`, `จังหวัด`, `อำเภอ/เขต`, `ตำบล/แขวง`, `วันที่เริ่มป่วย` ดูทั้งหมดที่ [docs/data_sources.md](docs/data_sources.md)
 
 โรคในข้อมูล (หลัง Standardize): ไข้หวัดใหญ่, ไข้เลือดออก, อุจจาระร่วงเฉียบพลัน, ปอดบวม, โควิด-19
 
@@ -256,7 +260,9 @@ docker compose exec airflow bash -c "cd /opt/airflow/project && python -m pytest
 
 ## ข้อควรระวังในการตีความผล
 
-- **Sample bias**: ข้อมูลช่วงพัฒนาคือ 100 records แรกของแต่ละปี ไม่ใช่ random sample และแต่ละไฟล์มีวันที่เริ่มป่วยเพียงวันเดียว จึงใช้ทดสอบ pipeline เท่านั้น ห้ามใช้สรุปการกระจายของโรคหรือแนวโน้ม
+- **Sample bias**: ไฟล์ sample จาก API คือ 100 records แรกของแต่ละปี ใช้ทดสอบ pipeline เท่านั้น และ**วันที่ใน JSON ของ API ผิด** (datastore อ่าน `1/6/2025` เป็น 6 ม.ค.) ใช้ไฟล์เต็มสำหรับการวิเคราะห์
+- **ช่วงเวลาไม่ครบปี**: ปี 2568 เริ่ม มิ.ย. 2025 จึงห้ามเทียบยอดรวมทั้งปี 2568 กับ 2569 ตรง ๆ ให้เทียบรายเดือนที่ตรงกัน
+- **ไข้เลือดออก** ปี 2569 รวม DF + DHF + DSS (ไข้เลือดออกรวม) เพื่อให้เทียบกับปี 2568 ได้
 - **Incidence rate** แสดงเฉพาะเมื่อมีข้อมูลประชากรครบ 50 เขต และไม่คำนวณแยกตามอายุ/เพศ (ไม่มีประชากรแยกอายุ/เพศ)
 - **ชื่อโรคต่างกันระหว่างปี** เช่น `อุจจาระร่วง` (2568) กับ `โรคอุจจาระร่วงเฉียบพลัน` (2569) ถูกรวมเป็น `อุจจาระร่วงเฉียบพลัน` ใน Spark โดยไม่แก้ Raw
 
@@ -292,9 +298,9 @@ Raw Data ต้องคงค่าตามต้นทาง ห้ามเ�
 | Raw zone บน Data Lake + Airflow | ✅ ใช้งานได้ |
 | Spark อ่าน/เขียนผ่าน Data Lake + DQ | ✅ ใช้งานได้ |
 | PostgreSQL Warehouse + views | ✅ ใช้งานได้ |
-| Unit tests | ✅ 45 tests |
+| Unit tests | ✅ 53 tests |
 | ข้อมูลประชากร 50 เขต (incidence rate) | ⏳ รอแหล่งข้อมูลทางการ — ปัจจุบันรันแบบ cases-only |
-| ข้อมูลเต็ม (~428k records) | ⏳ ยังไม่ได้ดึง |
+| ข้อมูลเต็ม (473,529 records, มิ.ย. 2025 – ก.ย. 2026) | ✅ รันผ่านทั้ง pipeline |
 | ไฟล์รายงาน Power BI (.pbix) | ⏳ ต้องสร้างใน Power BI Desktop ตาม `powerbi/report_layout.md` |
 
 ---

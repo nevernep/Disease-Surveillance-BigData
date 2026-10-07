@@ -1,5 +1,6 @@
+import re
 from pathlib import Path
-from typing import List
+from typing import Dict, Iterable, List, Tuple
 
 import pandas as pd
 from pyspark.sql import DataFrame, SparkSession
@@ -13,62 +14,125 @@ NESTED_RECORD_KEYS = ["data", "records", "result", "results", "items"]
 PATH_NOT_FOUND_MARKERS = ("PATH_NOT_FOUND", "Path does not exist")
 CSV_ENCODINGS = ["utf-8-sig", "utf-8", "cp874", "tis-620"]
 
+# disease_cases_{year}_{full|sample}.{csv|json}
+DISEASE_FILE_PATTERN = re.compile(
+    r"disease_cases_(\d{4})_(full|sample)\.(csv|json)$"
+)
+# Lower rank wins: the full download replaces the 100-record API sample.
+DISEASE_KIND_RANK = {"full": 0, "sample": 1}
 
-def read_disease_json(
-    spark: SparkSession,
-    disease_directory: Path,
-) -> DataFrame:
-    """อ่านไฟล์ Disease แบบ JSON หรือ CSV จากโฟลเดอร์"""
 
-    source_files = sorted(disease_directory.glob("disease_cases_*") )
+def select_disease_files(paths: Iterable[str]) -> List[str]:
+    """เลือกไฟล์ Disease ปีละ 1 ไฟล์: ใช้ _full ก่อน _sample
 
-    if not source_files:
-        raise FileNotFoundError(
-            f"ไม่พบไฟล์ Disease ใน {disease_directory}"
-        )
+    ป้องกันการนับผู้ป่วยซ้ำเมื่อมีทั้งไฟล์ sample และไฟล์เต็มของปีเดียวกัน
+    """
 
-    json_files = []
-    csv_files = []
-    for path in source_files:
-        with path.open("r", encoding="utf-8-sig") as source:
-            first_character = source.read(1)
-        if first_character in {"[", "{"}:
-            json_files.append(str(path))
-        else:
-            csv_files.append(str(path))
+    chosen: Dict[str, Tuple[int, str]] = {}
 
-    dataframes = []
-    if json_files:
-        dataframes.append(
-            spark.read
-            .option("multiLine", True)
-            .option("mode", "PERMISSIVE")
-            .json(json_files)
-        )
-    if csv_files:
-        dataframes.append(
+    for path in paths:
+        match = DISEASE_FILE_PATTERN.search(str(path))
+        if match is None:
+            continue
+        year, kind = match.group(1), match.group(2)
+        rank = DISEASE_KIND_RANK[kind]
+        if year not in chosen or rank < chosen[year][0]:
+            chosen[year] = (rank, str(path))
+
+    return [chosen[year][1] for year in sorted(chosen)]
+
+
+def _strip_bom_columns(dataframe: DataFrame) -> DataFrame:
+    for column in dataframe.columns:
+        cleaned = column.replace("\ufeff", "").strip()
+        if cleaned != column:
+            dataframe = dataframe.withColumnRenamed(column, cleaned)
+    return dataframe
+
+
+def _with_record_id(dataframe: DataFrame, source_path: str) -> DataFrame:
+    """เพิ่ม _record_id = ชื่อไฟล์:ลำดับแถว ให้ไฟล์ที่ไม่มี _id (CSV ต้นฉบับ)
+
+    ผู้ป่วยต่างคนอาจมีวัน เขต โรค เพศ อายุ ตรงกันทุกค่า หากใช้ hash ของค่าเหล่านี้
+    เป็น case_id จะถูกตัดเป็นข้อมูลซ้ำผิด ๆ จึงใช้ลำดับแถวในไฟล์แทน
+    (อ่านแบบ multiLine ทำให้ 1 ไฟล์ = 1 partition จึงได้เลขต่อเนื่องตามลำดับแถว)
+
+    ใช้ monotonically_increasing_id ซึ่งทำงานใน JVM ทั้งหมด แทน rdd.zipWithIndex ที่ส่ง
+    ทุกแถวผ่าน Python worker (กับข้อมูลเต็มทำให้ CPU เต็มจน Airflow heartbeat หมดเวลา)
+    """
+
+    file_name = source_path.rstrip("/").rsplit("/", 1)[-1]
+    row_number = F.monotonically_increasing_id() + F.lit(1)
+
+    return dataframe.withColumn(
+        "_record_id",
+        F.concat_ws(":", F.lit(file_name), row_number.cast("string")),
+    )
+
+
+def _read_disease_file(spark: SparkSession, path: str) -> DataFrame:
+    if path.endswith(".csv"):
+        dataframe = (
             spark.read
             .option("header", True)
             .option("encoding", "UTF-8")
+            .option("multiLine", True)
+            .option("quote", '"')
+            .option("escape", '"')
             .option("mode", "PERMISSIVE")
-            .csv(csv_files)
+            .csv(path)
         )
+        dataframe = _strip_bom_columns(dataframe)
+        dataframe = dataframe.withColumn("_source_file", F.input_file_name())
+        return _with_record_id(dataframe, path)
 
-    dataframe = dataframes[0]
-    for next_dataframe in dataframes[1:]:
-        dataframe = dataframe.unionByName(
-            next_dataframe,
-            allowMissingColumns=True,
-        )
-
+    dataframe = (
+        spark.read
+        .option("multiLine", True)
+        .option("mode", "PERMISSIVE")
+        .json(path)
+    )
     dataframe = dataframe.withColumn("_source_file", F.input_file_name())
+    return _flatten_nested_records(dataframe)
 
-    dataframe = _flatten_nested_records(dataframe)
+
+def read_disease_files(spark: SparkSession, paths: List[str]) -> DataFrame:
+    """อ่านไฟล์ Disease ที่เลือกแล้ว (CSV และ/หรือ JSON) รวมเป็น DataFrame เดียว"""
+
+    if not paths:
+        raise FileNotFoundError("ไม่พบไฟล์ Disease ที่ตรงรูปแบบ disease_cases_{ปี}_{full|sample}")
+
+    for path in paths:
+        print(f"      ใช้ไฟล์: {path}")
+
+    dataframe = None
+    for path in paths:
+        frame = _read_disease_file(spark, path)
+        dataframe = (
+            frame
+            if dataframe is None
+            else dataframe.unionByName(frame, allowMissingColumns=True)
+        )
 
     if "_corrupt_record" in dataframe.columns:
         dataframe = dataframe.drop("_corrupt_record")
 
     return dataframe
+
+
+def read_disease_json(
+    spark: SparkSession,
+    disease_directory: Path,
+) -> DataFrame:
+    """อ่านไฟล์ Disease จากโฟลเดอร์ในเครื่อง (ปีละ 1 ไฟล์ ใช้ไฟล์เต็มก่อน)"""
+
+    paths = select_disease_files(
+        str(path) for path in sorted(disease_directory.glob("disease_cases_*"))
+    )
+    if not paths:
+        raise FileNotFoundError(f"ไม่พบไฟล์ Disease ใน {disease_directory}")
+
+    return read_disease_files(spark, paths)
 
 
 def _read_lake(reader, path_glob: str, file_format: str) -> DataFrame:
@@ -84,25 +148,31 @@ def _read_lake(reader, path_glob: str, file_format: str) -> DataFrame:
         raise
 
 
+def list_lake_files(spark: SparkSession, path_glob: str) -> List[str]:
+    """ขยาย glob บน Data Lake ผ่าน Hadoop FileSystem (เช่น s3a://)"""
+
+    jvm = spark.sparkContext._jvm
+    hadoop_path = jvm.org.apache.hadoop.fs.Path(path_glob)
+    filesystem = hadoop_path.getFileSystem(
+        spark.sparkContext._jsc.hadoopConfiguration()
+    )
+    statuses = filesystem.globStatus(hadoop_path) or []
+    return sorted(
+        status.getPath().toString() for status in statuses if status.isFile()
+    )
+
+
 def read_disease_from_lake(
     spark: SparkSession,
     path_glob: str,
 ) -> DataFrame:
-    """อ่าน Raw JSON ที่ DAG land ไว้ใน raw/disease/year=*/ ของ Data Lake"""
+    """อ่าน Raw ที่ DAG land ไว้ใน raw/disease/year=*/ (ปีละ 1 ไฟล์ ใช้ไฟล์เต็มก่อน)"""
 
-    reader = (
-        spark.read
-        .option("multiLine", True)
-        .option("mode", "PERMISSIVE")
-    )
-    dataframe = _read_lake(reader, path_glob, "json")
-    dataframe = dataframe.withColumn("_source_file", F.input_file_name())
-    dataframe = _flatten_nested_records(dataframe)
+    paths = select_disease_files(list_lake_files(spark, path_glob))
+    if not paths:
+        raise FileNotFoundError(f"ไม่พบไฟล์ใน Data Lake: {path_glob}")
 
-    if "_corrupt_record" in dataframe.columns:
-        dataframe = dataframe.drop("_corrupt_record")
-
-    return dataframe
+    return read_disease_files(spark, paths)
 
 
 def read_population_from_lake(
@@ -119,10 +189,7 @@ def read_population_from_lake(
     dataframe = _read_lake(reader, path_glob, "csv")
 
     # ไฟล์เขียนด้วย utf-8-sig: ตัด BOM ออกจากชื่อคอลัมน์แรก
-    for column in dataframe.columns:
-        cleaned = column.replace("\ufeff", "").strip()
-        if cleaned != column:
-            dataframe = dataframe.withColumnRenamed(column, cleaned)
+    dataframe = _strip_bom_columns(dataframe)
 
     has_district = find_column(
         dataframe, POPULATION_COLUMN_ALIASES["district_name"]

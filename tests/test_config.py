@@ -21,7 +21,7 @@ def test_lake_paths_use_s3a_uris():
     )
 
     assert paths.lake_raw_disease_glob == (
-        "s3a://disease-surveillance/raw/disease/year=*/disease_cases_*.json"
+        "s3a://disease-surveillance/raw/disease/year=*/disease_cases_*"
     )
     assert paths.lake_raw_population_glob == (
         "s3a://disease-surveillance/raw/population/year=*/"

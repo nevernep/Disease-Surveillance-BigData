@@ -1,4 +1,5 @@
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -34,7 +35,7 @@ class ProjectPaths:
 
     @property
     def lake_raw_disease_glob(self) -> str:
-        return f"{self._require_lake()}/raw/disease/year=*/disease_cases_*.json"
+        return f"{self._require_lake()}/raw/disease/year=*/disease_cases_*"
 
     @property
     def lake_raw_population_glob(self) -> str:
@@ -133,6 +134,7 @@ class Settings:
     s3_access_key: Optional[str] = None
     s3_secret_key: Optional[str] = None
     extra_jars: Optional[str] = None
+    driver_memory: Optional[str] = None
 
     @classmethod
     def from_env(cls, project_root: Path) -> "Settings":
@@ -162,6 +164,7 @@ class Settings:
             s3_access_key=os.getenv("S3_ACCESS_KEY") or None,
             s3_secret_key=os.getenv("S3_SECRET_KEY") or None,
             extra_jars=os.getenv("SPARK_JARS") or None,
+            driver_memory=os.getenv("SPARK_DRIVER_MEMORY") or None,
         )
 
 
@@ -175,6 +178,19 @@ def create_spark_session(
 
     if settings.extra_jars:
         builder = builder.config("spark.jars", settings.extra_jars)
+
+    # local[N]: make the JVM see N CPUs too, so GC/compiler threads don't
+    # saturate every core and starve Airflow running in the same container.
+    local_cores = re.fullmatch(r"local\[(\d+)\]", settings.spark_master)
+    if local_cores:
+        builder = builder.config(
+            "spark.driver.extraJavaOptions",
+            f"-XX:ActiveProcessorCount={local_cores.group(1)}",
+        )
+
+    if settings.driver_memory:
+        # Applies because the JVM is launched by this session (not reused).
+        builder = builder.config("spark.driver.memory", settings.driver_memory)
 
     if settings.data_lake_uri:
         if not settings.s3_endpoint:

@@ -59,6 +59,27 @@ def test_standardize_diarrhea_across_years(spark):
     assert {row["value"] for row in results} == {"อุจจาระร่วงเฉียบพลัน"}
 
 
+def test_standardize_2569_disease_names(spark):
+    data = spark.createDataFrame(
+        [
+            ("ติดเชื้อไวรัสโคโรนา 2019 (covid-19)",),
+            ("โรคปอดอักเสบหรือโรคปอดบวม",),
+            ("ไข้เด็งกี่ (Dengue fever)",),
+            ("ไข้เลือดออก (DHF)",),
+            ("ไข้เลือดออกช็อค (DSS)",),
+        ],
+        ["raw"],
+    )
+
+    results = data.select(
+        standardize_disease(F.col("raw")).alias("value")
+    ).collect()
+
+    assert [row["value"] for row in results] == [
+        "โควิด-19", "ปอดบวม", "ไข้เลือดออก", "ไข้เลือดออก", "ไข้เลือดออก",
+    ]
+
+
 def test_standardize_pneumonia(spark):
     data = spark.createDataFrame(
         [("โรคปอดบวม",), ("ปอดอักเสบ",), ("Pneumonia",)], ["raw"]

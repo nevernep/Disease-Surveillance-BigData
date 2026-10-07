@@ -61,6 +61,7 @@ def run_pipeline(
         canonical = canonicalize_disease_data(raw_disease)
 
         print("[3/10] ทำความสะอาดข้อมูล")
+        canonical.cache()
         quarantine = quarantine_disease_data(canonical, settings)
         cleaned = clean_disease_data(canonical, settings)
         write_parquet_directory(quarantine, paths.quarantine_dir)
@@ -129,6 +130,7 @@ def run_pipeline(
             settings=settings,
             population_available=population_available,
             warehouse=warehouse_tables,
+            quarantine=quarantine,
         )
 
         report.show(truncate=False)

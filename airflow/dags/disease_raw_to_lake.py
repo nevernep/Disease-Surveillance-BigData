@@ -1,4 +1,4 @@
-"""Validate the extracted disease samples and land them in the S3-compatible raw zone."""
+"""Validate the extracted disease data (full CSV or API sample) and land it in the S3 raw zone."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import boto3
+from boto3.s3.transfer import TransferConfig
 from botocore.exceptions import ClientError
 from airflow import DAG  # pyright: ignore[reportAttributeAccessIssue, reportMissingImports]
 from airflow.exceptions import AirflowSkipException  # pyright: ignore[reportMissingImports]
@@ -43,6 +44,15 @@ EXPECTED_FIELDS = {
     "เพศ", "สถานภาพสมรส", "สัญชาติ", "อาชีพ", "จังหวัด", "อำเภอ/เขต",
     "ตำบล/แขวง", "วันที่เริ่มป่วย", "สภาพผู้ป่วย", "ประเภทผู้ป่วย", "สถานที่รักษา",
 }
+# Low-memory multipart upload: the default (10 threads x 8 MB buffers per file,
+# two years in parallel) exhausted the container's RAM on the ~90 MB CSVs.
+UPLOAD_CONFIG = TransferConfig(
+    multipart_threshold=16 * 1024 * 1024,
+    multipart_chunksize=8 * 1024 * 1024,
+    max_concurrency=2,
+)
+# The full CSV download is the original file: same fields without the API's _id.
+CSV_EXPECTED_FIELDS = EXPECTED_FIELDS - {"_id"}
 
 
 def _s3_client():
@@ -82,15 +92,63 @@ def _validate_disease(payload: bytes, source_name: str) -> list:
     return records
 
 
-def land_sample(year: str):
-    source = Path(os.environ["RAW_DATA_DIR"]) / "disease" / f"disease_cases_{year}_sample.json"
-    if not source.is_file():
-        raise FileNotFoundError(f"Required raw input is missing: {source.name}")
+def _validate_disease_csv(source: Path) -> int:
+    """Stream-check the full CSV download against the 15-field file contract.
 
-    payload = source.read_bytes()
-    records = _validate_disease(payload, source.name)
+    The original CSV has no _id (the datastore API adds it), so it carries
+    EXPECTED_FIELDS minus _id. Returns the number of data rows.
+    """
+    with source.open("r", encoding="utf-8-sig", newline="") as handle:
+        reader = csv.reader(handle)
+        header = [column.strip() for column in next(reader, [])]
+        if len(header) != len(CSV_EXPECTED_FIELDS) or set(header) != CSV_EXPECTED_FIELDS:
+            raise ValueError(
+                f"{source.name}: header does not match the 15-field CSV contract; got {header}"
+            )
+        rows = 0
+        for line_number, row in enumerate(reader, start=2):
+            if len(row) != len(header):
+                raise ValueError(
+                    f"{source.name}:{line_number}: expected {len(header)} columns, got {len(row)}"
+                )
+            rows += 1
+    if rows == 0:
+        raise ValueError(f"{source.name}: no data rows")
+    return rows
 
-    digest = hashlib.sha256(payload).hexdigest()
+
+def _disease_source(year: str) -> Path:
+    """Prefer the full CSV download; fall back to the 100-record API sample."""
+    base = Path(os.environ["RAW_DATA_DIR"]) / "disease"
+    for name in (f"disease_cases_{year}_full.csv", f"disease_cases_{year}_sample.json"):
+        if (base / name).is_file():
+            return base / name
+    raise FileNotFoundError(
+        f"Required raw input is missing for {year}: disease_cases_{year}_full.csv "
+        f"or disease_cases_{year}_sample.json"
+    )
+
+
+def _file_sha256(source: Path) -> str:
+    digest = hashlib.sha256()
+    with source.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def land_disease(year: str):
+    source = _disease_source(year)
+    if source.suffix == ".csv":
+        record_count = _validate_disease_csv(source)
+        file_format, content_type = "csv", "text/csv"
+        origin = "data.bangkok.go.th resource CSV (full download)"
+    else:
+        record_count = len(_validate_disease(source.read_bytes(), source.name))
+        file_format, content_type = "json", JSON_CONTENT_TYPE
+        origin = "Data.go.th Data API (sample)"
+
+    digest = _file_sha256(source)
     bucket = os.environ["DATA_LAKE_BUCKET"]
     key = f"raw/disease/year={year}/{source.name}"
     client = _s3_client()
@@ -108,23 +166,31 @@ def land_sample(year: str):
         code = str(error.response.get("Error", {}).get("Code", ""))
         if code not in {"404", "NoSuchKey", "NotFound"}:
             raise
-        client.put_object(
-            Bucket=bucket,
-            Key=key,
-            Body=payload,
-            ContentType=JSON_CONTENT_TYPE,
-            Metadata={"sha256": digest, "record-count": str(len(records)), "source-year-be": year},
+        # upload_file streams from disk (multipart for large files).
+        client.upload_file(
+            str(source),
+            bucket,
+            key,
+            ExtraArgs={
+                "ContentType": content_type,
+                "Metadata": {
+                    "sha256": digest,
+                    "record-count": str(record_count),
+                    "source-year-be": year,
+                },
+            },
+            Config=UPLOAD_CONFIG,
         )
 
     manifest = {
         "dataset": "disease_cases",
-        "source": "Data.go.th Data API",
+        "source": origin,
         "year_be": year,
         "filename": source.name,
         "object_key": key,
-        "format": "json",
-        "record_count": len(records),
-        "size_bytes": len(payload),
+        "format": file_format,
+        "record_count": record_count,
+        "size_bytes": source.stat().st_size,
         "sha256": digest,
         "landed_at_utc": datetime.now(timezone.utc).isoformat(),
     }
@@ -134,7 +200,7 @@ def land_sample(year: str):
         Body=json.dumps(manifest, ensure_ascii=False, indent=2).encode("utf-8"),
         ContentType=JSON_CONTENT_TYPE,
     )
-    print(f"Landed {len(records)} records: s3://{bucket}/{key}; sha256={digest}")
+    print(f"Landed {record_count} records: s3://{bucket}/{key}; sha256={digest}")
 
 
 def population_required() -> bool:
@@ -272,7 +338,7 @@ def land_population(year: str):
 
 with DAG(
     dag_id="disease_raw_to_lake",
-    description="Validate existing Data.go.th disease samples and land immutable raw objects in S3-compatible storage",
+    description="Validate disease data (full CSV or API sample) and population, land immutable raw objects in S3",
     start_date=datetime(2026, 1, 1),
     schedule=None,
     catchup=False,
@@ -284,7 +350,7 @@ with DAG(
     for data_year in YEARS:
         upload = PythonOperator(
             task_id=f"land_disease_{data_year}",
-            python_callable=land_sample,
+            python_callable=land_disease,
             op_kwargs={"year": data_year},
         )
         create_bucket >> upload  # pyright: ignore[reportUnusedExpression]

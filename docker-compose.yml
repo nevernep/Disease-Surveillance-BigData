@@ -76,7 +76,10 @@ services:
       # workers, longer startup timeout, and Spark capped at 2 cores.
       AIRFLOW__WEBSERVER__WORKERS: "2"
       AIRFLOW__WEBSERVER__WEB_SERVER_MASTER_TIMEOUT: "300"
+      # A long Spark task under load must not be declared a zombie and killed.
+      AIRFLOW__SCHEDULER__SCHEDULER_ZOMBIE_TASK_THRESHOLD: "900"
       SPARK_MASTER: ${SPARK_MASTER:-local[2]}
+      SPARK_DRIVER_MEMORY: ${SPARK_DRIVER_MEMORY:-1g}
       S3_ENDPOINT: http://object-store:8333
       S3_ACCESS_KEY: ${S3_ACCESS_KEY:-surveillance-local}
       S3_SECRET_KEY: ${S3_SECRET_KEY:-surveillance-local-secret}

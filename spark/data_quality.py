@@ -37,6 +37,7 @@ def run_quality_checks(
     canonical: Optional[DataFrame] = None,
     population_available: bool = True,
     warehouse: Optional[Dict[str, DataFrame]] = None,
+    quarantine: Optional[DataFrame] = None,
 ) -> Tuple[DataFrame, bool]:
     """ตรวจกฎคุณภาพข้อมูลทั้งหมดและคืนผลเป็น DataFrame"""
 
@@ -242,6 +243,11 @@ def run_quality_checks(
         ),
     ]
 
+    checks.append(_raw_duplicate_check(raw, raw_rows))
+
+    if quarantine is not None:
+        checks.extend(_quarantine_reason_checks(quarantine))
+
     if warehouse is not None:
         checks.extend(_warehouse_checks(standardized, warehouse))
 
@@ -288,4 +294,40 @@ def _warehouse_checks(
             str(unmatched_date_keys), "= 0",
             _status(unmatched_date_keys == 0),
         ),
+    ]
+
+
+# Lineage columns added by the readers; not part of the source record.
+_LINEAGE_COLUMNS = {"_source_file", "_record_id", "_id"}
+
+
+def _raw_duplicate_check(raw: DataFrame, raw_rows: int) -> QualityCheck:
+    """Rows identical in every source field (informational).
+
+    They are kept: the CSV has no patient id, so two patients reported on the
+    same day with the same attributes look identical.
+    """
+
+    source_columns = [c for c in raw.columns if c not in _LINEAGE_COLUMNS]
+    distinct_rows = raw.select(*source_columns).distinct().count()
+
+    return QualityCheck(
+        "raw", "identical_source_rows_kept",
+        str(raw_rows - distinct_rows), "informational", "PASS",
+    )
+
+
+def _quarantine_reason_checks(quarantine: DataFrame) -> List[QualityCheck]:
+    """One informational row per quarantine reason."""
+
+    counts = (
+        quarantine.groupBy("_quarantine_reason").count()
+        .orderBy("_quarantine_reason").collect()
+    )
+    return [
+        QualityCheck(
+            "clean", f"quarantined_{row['_quarantine_reason']}",
+            str(row["count"]), "informational", "PASS",
+        )
+        for row in counts
     ]

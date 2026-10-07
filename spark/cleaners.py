@@ -4,7 +4,8 @@ from pyspark.sql import Column, DataFrame
 from pyspark.sql import functions as F
 
 from spark.config import Settings
-from spark.schemas import DISEASE_COLUMN_ALIASES
+from spark.schemas import BANGKOK_DISTRICTS, DISEASE_COLUMN_ALIASES
+from spark.standardizers import standardize_district
 
 
 # ---------------------------------------------------------
@@ -233,6 +234,12 @@ def invalid_reason(settings: Settings) -> Column:
         )
         .when(blank("disease_name_raw"), F.lit("missing_disease_name"))
         .when(blank("district_name_raw"), F.lit("missing_district_name"))
+        # e.g. "เมืองระยอง" or "1020" under province กรุงเทพมหานคร: outside the
+        # 50-district scope, kept in quarantine instead of failing the run.
+        .when(
+            ~standardize_district(F.col("district_name_raw")).isin(BANGKOK_DISTRICTS),
+            F.lit("district_not_in_bangkok"),
+        )
         .when(
             F.col("case_count").isNull() | (F.col("case_count") <= 0),
             F.lit("invalid_case_count"),

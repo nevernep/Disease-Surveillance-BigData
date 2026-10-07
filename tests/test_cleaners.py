@@ -40,6 +40,8 @@ def _canonical_rows(spark):
         (2568, onset, "ไข้เลือดออก", "บางกะปิ", 1.0, 500.0),  # bad age
         (2568, None, "ไข้เลือดออก", "บางกะปิ", 1.0, 30.0),    # no onset date
         (None, onset, "ไข้เลือดออก", "บางกะปิ", 1.0, 30.0),   # no year
+        (2568, onset, "ไข้เลือดออก", "เมืองระยอง", 1.0, 30.0),  # not Bangkok
+        (2568, onset, "ไข้เลือดออก", "เขตบางพลัด", 1.0, 30.0),  # valid ("เขต" prefix)
     ]
     return spark.createDataFrame(
         rows,
@@ -49,7 +51,7 @@ def _canonical_rows(spark):
 
 
 def test_clean_removes_invalid_rows(spark, settings):
-    assert clean_disease_data(_canonical_rows(spark), settings).count() == 1
+    assert clean_disease_data(_canonical_rows(spark), settings).count() == 2
 
 
 def test_clean_and_quarantine_partition_every_row(spark, settings):
@@ -66,4 +68,5 @@ def test_clean_and_quarantine_partition_every_row(spark, settings):
         "invalid_age",
         "invalid_or_missing_report_date",
         "invalid_year",
+        "district_not_in_bangkok",
     }

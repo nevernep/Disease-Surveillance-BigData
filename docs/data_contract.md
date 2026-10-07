@@ -105,23 +105,24 @@ UTF-8
 
 # 5. Disease Raw File Naming Convention
 
-รูปแบบชื่อไฟล์:
+มีไฟล์ได้ 2 แบบต่อปี ใน `data/raw/disease/`:
 
-disease_cases_{year}_sample.json
+| ไฟล์ | ที่มา | รูปแบบ | Fields |
+|---|---|---|---|
+| `disease_cases_{year}_full.csv` | ไฟล์ต้นฉบับทั้งชุด (`extract_disease.py --full`) | CSV UTF-8 BOM, CRLF | 15 (ไม่มี `_id`) |
+| `disease_cases_{year}_sample.json` | Data API 100 records แรก | JSON array | 16 (มี `_id`) |
 
-ตัวอย่าง:
+**ถ้ามีทั้งสองไฟล์ของปีเดียวกัน ระบบใช้ `_full.csv`** ทั้ง DAG (land) และ Spark (read)
+เพื่อไม่ให้นับผู้ป่วยซ้ำ
 
-disease_cases_2568_sample.json
-disease_cases_2569_sample.json
+ข้อตกลงของไฟล์ CSV:
 
-Development Source Path:
+- header ต้องเป็น 15 fields ตาม section 6 (ไม่รวม `_id`) และทุกแถวต้องมี 15 คอลัมน์
+- `วันที่เริ่มป่วย` เป็น `D/M/YYYY` ค.ศ. เช่น `1/6/2025` = 1 มิถุนายน 2025
+- ไม่มีรหัสผู้ป่วย Spark สร้าง `_record_id` = `{ชื่อไฟล์}:{ลำดับแถว}` เป็น case id
 
-data/raw/disease/
-
-Expected files:
-
-data/raw/disease/disease_cases_2568_sample.json
-data/raw/disease/disease_cases_2569_sample.json
+> วันที่ใน JSON ของ Data API ถูก datastore แปลงผิด (อ่าน `1/6/2025` เป็น 6 ม.ค.)
+> จึงใช้ JSON เพื่อทดสอบ pipeline เท่านั้น
 
 ---
 
@@ -178,18 +179,29 @@ PART 1 ตรวจสอบเบื้องต้น:
 
 โรคอุจจาระร่วงเฉียบพลัน
 
-PART 3 ต้องพิจารณา Standardization ก่อนวิเคราะห์ข้ามปี
+PART 3 ทำ Standardization ใน `spark/schemas.py` (`DISEASE_ALIASES`) ค่า raw เก็บไว้ใน
+`disease_name_raw` ห้ามแก้ไขใน Raw Layer
 
-ตัวอย่าง:
+| ชื่อมาตรฐาน | ค่าในต้นทาง |
+|---|---|
+| ไข้หวัดใหญ่ | ไข้หวัดใหญ่ |
+| อุจจาระร่วงเฉียบพลัน | อุจจาระร่วง (2568), โรคอุจจาระร่วงเฉียบพลัน (2569) |
+| โควิด-19 | โควิด-19 (COVID-19) (2568), ติดเชื้อไวรัสโคโรนา 2019 (covid-19) (2569) |
+| ปอดบวม | โรคปอดบวม (2568), โรคปอดอักเสบหรือโรคปอดบวม (2569) |
+| ไข้เลือดออก (รวม) | ไข้เลือดออก (2568); ไข้เด็งกี่ (Dengue fever), ไข้เลือดออก (DHF), ไข้เลือดออกช็อค (DSS) (2569) |
 
-อุจจาระร่วง
-โรคอุจจาระร่วงเฉียบพลัน
+ข้อมูลที่ถูกแยกไป quarantine (`processed/quarantine/`, คอลัมน์ `_quarantine_reason`):
 
-        ↓
+| เหตุผล | ความหมาย |
+|---|---|
+| `invalid_year` | ไม่มีปี หรือปีอยู่นอกช่วงที่กำหนด |
+| `missing_disease_name` / `missing_district_name` | ไม่มีชื่อโรค หรือไม่มีชื่อเขต |
+| `district_not_in_bangkok` | เขตไม่อยู่ใน 50 เขตของกรุงเทพฯ เช่น `เมืองระยอง`, `1020` |
+| `invalid_case_count` | จำนวนผู้ป่วยน้อยกว่าหรือเท่ากับ 0 |
+| `invalid_age` | อายุนอกช่วง 0–120 ปี |
+| `invalid_or_missing_report_date` | วันที่เริ่มป่วยอ่านไม่ได้ |
 
-Acute Diarrhea
-
-ห้ามแก้ไขค่าดังกล่าวใน Raw Layer
+แถวที่ค่าเหมือนกันทุกช่องจะ**ถูกเก็บไว้** (ไม่มีรหัสผู้ป่วยให้แยก) และรายงานจำนวนใน DQ
 
 ---
 

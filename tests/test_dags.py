@@ -119,3 +119,53 @@ def test_population_required_flag(raw_dag_module, monkeypatch, value, expected):
     monkeypatch.setenv("REQUIRE_POPULATION", value)
 
     assert raw_dag_module.population_required() is expected
+
+
+def _write_csv(path, header, rows):
+    path.write_text(
+        "\r\n".join([",".join(header)] + [",".join(row) for row in rows]) + "\r\n",
+        encoding="utf-8-sig",
+    )
+
+
+def test_validate_disease_csv_counts_rows(raw_dag_module, tmp_path):
+    header = [field for field in FIELDS if field != "_id"]
+    path = tmp_path / "disease_cases_2568_full.csv"
+    _write_csv(path, header, [["x"] * 15, ["y"] * 15])
+
+    assert raw_dag_module._validate_disease_csv(path) == 2
+
+
+@pytest.mark.parametrize(
+    ("header", "rows", "message"),
+    [
+        (FIELDS, [["x"] * 16], "15-field"),             # API header with _id
+        (None, [["x"] * 15, ["x"] * 14], "columns"),    # ragged row
+        (None, [], "no data rows"),
+    ],
+    ids=["has-_id", "ragged-row", "empty"],
+)
+def test_validate_disease_csv_rejects_violations(
+    raw_dag_module, tmp_path, header, rows, message
+):
+    header = header or [field for field in FIELDS if field != "_id"]
+    path = tmp_path / "disease_cases_2568_full.csv"
+    _write_csv(path, header, rows)
+
+    with pytest.raises(ValueError, match=message):
+        raw_dag_module._validate_disease_csv(path)
+
+
+def test_disease_source_prefers_full_csv(raw_dag_module, tmp_path, monkeypatch):
+    disease_dir = tmp_path / "disease"
+    disease_dir.mkdir()
+    (disease_dir / "disease_cases_2568_sample.json").write_text("[]")
+    monkeypatch.setenv("RAW_DATA_DIR", str(tmp_path))
+
+    assert raw_dag_module._disease_source("2568").name == "disease_cases_2568_sample.json"
+
+    (disease_dir / "disease_cases_2568_full.csv").write_text("h\n")
+    assert raw_dag_module._disease_source("2568").name == "disease_cases_2568_full.csv"
+
+    with pytest.raises(FileNotFoundError):
+        raw_dag_module._disease_source("2569")

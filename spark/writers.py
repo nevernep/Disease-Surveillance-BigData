@@ -1,4 +1,5 @@
 import shutil
+import tempfile
 from pathlib import Path
 
 from pyspark.sql import DataFrame
@@ -48,10 +49,11 @@ def write_single_file(
 
     target_file.parent.mkdir(parents=True, exist_ok=True)
 
-    temporary_path = target_file.parent / f".{target_file.name}.tmp"
-
-    remove_path(temporary_path)
-    remove_path(target_file)
+    # Spark writes to the container's own filesystem first: listing a Docker
+    # Desktop bind mount right after a large write can lag and show no part
+    # file. Only the finished file is moved onto the target folder.
+    temporary_root = Path(tempfile.mkdtemp(prefix="spark_single_file_"))
+    temporary_path = temporary_root / "output"
 
     writer = dataframe.coalesce(1).write.mode("overwrite")
 
@@ -71,15 +73,17 @@ def write_single_file(
         temporary_path.glob(f"part-*.{output_format}")
     )
 
-    if len(part_files) != 1:
-        remove_path(temporary_path)
-        raise RuntimeError(
-            f"คาดว่าจะพบ 1 part file ใน {temporary_path} "
-            f"แต่พบ {len(part_files)} ไฟล์"
-        )
+    try:
+        if len(part_files) != 1:
+            raise RuntimeError(
+                f"คาดว่าจะพบ 1 part file ใน {temporary_path} "
+                f"แต่พบ {len(part_files)} ไฟล์"
+            )
 
-    shutil.move(str(part_files[0]), str(target_file))
-    remove_path(temporary_path)
+        remove_path(target_file)
+        shutil.move(str(part_files[0]), str(target_file))
+    finally:
+        remove_path(temporary_root)
 
 
 def write_quality_report(

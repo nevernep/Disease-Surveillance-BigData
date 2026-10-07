@@ -57,7 +57,7 @@ GOLD_PRIMARY_KEY = [
 DISEASE_COLUMN_ALIASES = {
     "case_id": [
         "case_id", "id", "patient_id", "record_id",
-        "_id", "รหัสผู้ป่วย", "เลขที่ผู้ป่วย",
+        "_id", "_record_id", "รหัสผู้ป่วย", "เลขที่ผู้ป่วย",
     ],
     "report_date": [
         "report_date", "date", "reported_date", "onset_date",
@@ -150,6 +150,12 @@ DISEASE_ALIASES = {
     "โรคไข้เลือดออก": _DISEASE_DENGUE,
     "dengue": _DISEASE_DENGUE,
     "denguefever": _DISEASE_DENGUE,
+    # 2569 splits dengue into DF / DHF / DSS; grouped as total dengue
+    # (ไข้เลือดออกรวม) so 2568 and 2569 stay comparable. The subtype is kept
+    # in disease_name_raw.
+    "ไข้เด็งกี่ (Dengue fever)": _DISEASE_DENGUE,
+    "ไข้เลือดออก (DHF)": _DISEASE_DENGUE,
+    "ไข้เลือดออกช็อค (DSS)": _DISEASE_DENGUE,
     _DISEASE_INFLUENZA: _DISEASE_INFLUENZA,
     "โรคไข้หวัดใหญ่": _DISEASE_INFLUENZA,
     "influenza": _DISEASE_INFLUENZA,
@@ -163,6 +169,7 @@ DISEASE_ALIASES = {
     "covid-19": _DISEASE_COVID,
     "โรคโควิด-19": _DISEASE_COVID,
     "โควิด-19 (COVID-19)": _DISEASE_COVID,
+    "ติดเชื้อไวรัสโคโรนา 2019 (covid-19)": _DISEASE_COVID,
     "โรคติดเชื้อไวรัสโคโรนา 2019": _DISEASE_COVID,
     "อุจจาระร่วง": _DISEASE_DIARRHEA,
     "โรคอุจจาระร่วง": _DISEASE_DIARRHEA,
@@ -175,6 +182,7 @@ DISEASE_ALIASES = {
     "ปอดอักเสบ": _DISEASE_PNEUMONIA,
     "โรคปอดอักเสบ": _DISEASE_PNEUMONIA,
     "pneumonia": _DISEASE_PNEUMONIA,
+    "โรคปอดอักเสบหรือโรคปอดบวม": _DISEASE_PNEUMONIA,
     _DISEASE_TUBERCULOSIS: _DISEASE_TUBERCULOSIS,
     "tuberculosis": _DISEASE_TUBERCULOSIS,
     "tb": _DISEASE_TUBERCULOSIS,

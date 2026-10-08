@@ -7,7 +7,9 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip("airflow")
+# "airflow" alone would import the repo's airflow/ folder (the DAGs) as a namespace
+# package; airflow.models only exists when Airflow is really installed.
+pytest.importorskip("airflow.models")
 
 # Repo checkout: airflow/dags; inside the Airflow container: $AIRFLOW_HOME/dags.
 DAG_FOLDER = Path(__file__).resolve().parents[1] / "airflow" / "dags"
@@ -43,7 +45,7 @@ def test_dags_import_without_errors(dagbag):
 
 
 def test_raw_dag_triggers_spark_even_when_population_is_skipped(dagbag):
-    dag = dagbag.get_dag("disease_raw_to_lake")
+    dag = dagbag.dags["disease_raw_to_lake"]
     trigger = dag.get_task("trigger_spark_processing")
 
     assert trigger.trigger_rule == "none_failed"
@@ -54,7 +56,7 @@ def test_raw_dag_triggers_spark_even_when_population_is_skipped(dagbag):
 
 
 def test_spark_dag_loads_warehouse_after_spark(dagbag):
-    dag = dagbag.get_dag("spark_processing")
+    dag = dagbag.dags["spark_processing"]
 
     assert dag.get_task("load_warehouse").upstream_task_ids == {
         "run_spark_pipeline"
@@ -184,7 +186,7 @@ def test_disease_source_picks_newest_versioned_download(raw_dag_module, tmp_path
 
 
 def test_raw_dag_downloads_weekly_before_landing(dagbag):
-    dag = dagbag.get_dag("disease_raw_to_lake")
+    dag = dagbag.dags["disease_raw_to_lake"]
 
     assert dag.timetable.summary == "0 6 * * 1"
     assert str(dag.timezone.name) == "Asia/Bangkok"

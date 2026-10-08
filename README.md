@@ -1,5 +1,7 @@
 # Disease Surveillance Big Data
 
+[![CI](https://github.com/nevernep/Disease-Surveillance-BigData/actions/workflows/ci.yml/badge.svg)](https://github.com/nevernep/Disease-Surveillance-BigData/actions/workflows/ci.yml)
+
 ## การวิเคราะห์ข้อมูลขนาดใหญ่เพื่อเฝ้าระวังแนวโน้มโรคติดต่อในกรุงเทพมหานคร
 
 **Big Data Analytics for Communicable Disease Surveillance in Bangkok**
@@ -282,6 +284,9 @@ Views: `vw_monthly_trend`, `vw_year_disease`, `vw_district_disease_year`, `vw_di
 pip install -r requirements.txt   # ต้องมี Java 17 สำหรับ PySpark
 pytest
 ```
+
+GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) รันเทสต์ทุกครั้งที่ push และทุก Pull Request
+แยกเป็น unit tests (Python 3.12 + Java 17 + PySpark), DAG tests (Airflow 2.10.5) และตรวจ `docker-compose.yml`
 
 หรือรันใน container ที่มี Spark และ Airflow ครบอยู่แล้ว (รวมเทสต์ของ DAG):
 

@@ -1,6 +1,9 @@
 import argparse
+import hashlib
 import json
 import os
+import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import requests
@@ -13,17 +16,14 @@ from dotenv import load_dotenv
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
+# Version naming is shared with the raw-landing DAG and the Spark reader.
+sys.path.insert(0, str(PROJECT_ROOT))
+from spark.raw_versions import latest_full, versioned_full_name  # noqa: E402
+
 RAW_DIR = PROJECT_ROOT / "data" / "raw" / "disease"
-RAW_DIR.mkdir(parents=True, exist_ok=True)
+BANGKOK_TZ = timezone(timedelta(hours=7))
 
 load_dotenv(PROJECT_ROOT / ".env")
-
-TOKEN = os.getenv("DATA_GO_TH_TOKEN")
-
-if not TOKEN:
-    raise ValueError(
-        "ไม่พบ DATA_GO_TH_TOKEN กรุณาตรวจสอบไฟล์ .env"
-    )
 
 
 BASE_URL = "https://opend.data.go.th/get-ckan/datastore_search"
@@ -39,9 +39,12 @@ RESOURCES = {
 SAMPLE_LIMIT = 100
 API_PAGE_SIZE = 1000
 
-HEADERS = {
-    "api-key": TOKEN
-}
+def api_headers():
+    """Token is read when a request is made, so importing this module is safe."""
+    token = os.getenv("DATA_GO_TH_TOKEN")
+    if not token:
+        raise ValueError("ไม่พบ DATA_GO_TH_TOKEN กรุณาตรวจสอบไฟล์ .env")
+    return {"api-key": token}
 
 
 # ============================================================
@@ -69,7 +72,7 @@ def extract_disease_sample(year, resource_id, limit=SAMPLE_LIMIT):
             response = requests.get(
                 BASE_URL,
                 params=params,
-                headers=HEADERS,
+                headers=api_headers(),
                 timeout=60,
             )
 
@@ -99,6 +102,7 @@ def extract_disease_sample(year, resource_id, limit=SAMPLE_LIMIT):
         # Save Raw JSON
         # ----------------------------------------------------
 
+        RAW_DIR.mkdir(parents=True, exist_ok=True)
         output_file = (
             RAW_DIR /
             f"disease_cases_{year}_sample.json"
@@ -137,63 +141,79 @@ def extract_disease_sample(year, resource_id, limit=SAMPLE_LIMIT):
 # Download Full Dataset (one request per year)
 # ============================================================
 
-def download_disease_full(year, resource_id, overwrite=False):
-    """ดาวน์โหลดไฟล์ CSV ทั้งชุดของ resource (1 คำขอ/ปี แทนการเรียก API หลายร้อยครั้ง)
+def _sha256(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as file:
+        for chunk in iter(lambda: file.read(DOWNLOAD_CHUNK_BYTES), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
-    ไฟล์ต้นฉบับมี 15 fields (ไม่มี _id ซึ่ง datastore API เพิ่มเอง)
-    เขียนลง .part ก่อน แล้วเปลี่ยนชื่อเมื่อขนาดตรงกับ Content-Length เท่านั้น
+
+def download_disease_full(year, resource_id, raw_dir=None, version=None):
+    """ดาวน์โหลดไฟล์ CSV ทั้งชุดของ resource (1 คำขอ/ปี) เป็นไฟล์เวอร์ชันใหม่
+
+    Raw ห้ามเขียนทับ: บันทึกเป็น disease_cases_{ปี}_full_{YYYYMMDD}.csv
+    ถ้าเนื้อหาเหมือนเวอร์ชันล่าสุดที่มีอยู่ (SHA-256 เท่ากัน) จะไม่เก็บซ้ำ
+    เขียนลง .part ก่อน และใช้ไฟล์เมื่อขนาดตรงกับ Content-Length เท่านั้น
+
+    คืนค่า (status, path): status = "new" | "unchanged"
     """
 
+    raw_dir = Path(raw_dir or RAW_DIR)
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    version = version or datetime.now(BANGKOK_TZ).strftime("%Y%m%d")
+    output_file = raw_dir / versioned_full_name(year, version)
+
     print("\n" + "=" * 60)
-    print(f"Downloading Full Disease Dataset ปี {year}")
+    print(f"Downloading Full Disease Dataset ปี {year} (version {version})")
     print("=" * 60)
 
-    output_file = RAW_DIR / f"disease_cases_{year}_full.csv"
-    if output_file.exists() and not overwrite:
-        print(f"มีไฟล์อยู่แล้ว ไม่ดาวน์โหลดซ้ำ: {output_file}")
-        print("ใช้ --overwrite หากต้องการแทนที่ (Raw ควรคงเดิม)")
-        return True
+    metadata = requests.get(
+        RESOURCE_SHOW_URL,
+        params={"id": resource_id},
+        headers=api_headers(),
+        timeout=60,
+    )
+    metadata.raise_for_status()
+    resource = metadata.json().get("result", {})
+    url = resource.get("url")
+    if not url:
+        raise RuntimeError(f"resource {resource_id}: no download URL in metadata")
 
-    try:
-        metadata = requests.get(
-            RESOURCE_SHOW_URL,
-            params={"id": resource_id},
-            headers=HEADERS,
-            timeout=60,
+    print(f"Source URL      : {url}")
+    print(f"Last modified   : {resource.get('last_modified')}")
+
+    partial_file = raw_dir / (output_file.name + ".part")
+    with requests.get(url, stream=True, timeout=300) as response:
+        response.raise_for_status()
+        expected = int(response.headers.get("Content-Length", 0))
+        written = 0
+        with open(partial_file, "wb") as file:
+            for chunk in response.iter_content(DOWNLOAD_CHUNK_BYTES):
+                file.write(chunk)
+                written += len(chunk)
+
+    if expected and written != expected:
+        partial_file.unlink(missing_ok=True)
+        raise RuntimeError(f"size mismatch: got {written:,} of {expected:,} bytes")
+
+    new_digest = _sha256(partial_file)
+    previous = latest_full([str(p) for p in raw_dir.glob(f"disease_cases_{year}_full*.csv")], year)
+    if previous and _sha256(previous) == new_digest:
+        partial_file.unlink()
+        print(f"Unchanged       : same content as {Path(previous).name}")
+        return "unchanged", Path(previous)
+
+    if output_file.exists():
+        partial_file.unlink()
+        raise FileExistsError(
+            f"{output_file.name} already exists with different content; "
+            "raw files are immutable — pass another --version"
         )
-        metadata.raise_for_status()
-        resource = metadata.json().get("result", {})
-        url = resource.get("url")
-        if not url:
-            print("ไม่พบ URL สำหรับดาวน์โหลดใน resource metadata")
-            return False
 
-        print(f"Source URL      : {url}")
-        print(f"Last modified   : {resource.get('last_modified')}")
-
-        partial_file = output_file.with_suffix(".csv.part")
-        with requests.get(url, stream=True, timeout=120) as response:
-            response.raise_for_status()
-            expected = int(response.headers.get("Content-Length", 0))
-            written = 0
-            with open(partial_file, "wb") as file:
-                for chunk in response.iter_content(DOWNLOAD_CHUNK_BYTES):
-                    file.write(chunk)
-                    written += len(chunk)
-
-        if expected and written != expected:
-            partial_file.unlink(missing_ok=True)
-            print(f"ขนาดไม่ตรง: ได้ {written:,} bytes จาก {expected:,}")
-            return False
-
-        partial_file.replace(output_file)
-        print(f"Saved           : {output_file} ({written:,} bytes)")
-        print("Status          : SUCCESS")
-        return True
-
-    except requests.exceptions.RequestException as error:
-        print(f"Request Error: {error}")
-        return False
+    partial_file.replace(output_file)
+    print(f"Saved           : {output_file} ({written:,} bytes, sha256 {new_digest[:12]}…)")
+    return "new", output_file
 
 
 # ============================================================
@@ -222,9 +242,8 @@ if __name__ == "__main__":
         help="ดาวน์โหลดไฟล์ CSV ทั้งชุด (1 คำขอ/ปี) เป็น disease_cases_{ปี}_full.csv",
     )
     parser.add_argument(
-        "--overwrite",
-        action="store_true",
-        help="ใช้กับ --full: แทนที่ไฟล์ที่มีอยู่แล้ว",
+        "--version",
+        help="ใช้กับ --full: กำหนดเวอร์ชัน YYYYMMDD เอง (ค่าเริ่มต้น = วันนี้ตามเวลาไทย)",
     )
     arguments = parser.parse_args()
 
@@ -248,9 +267,15 @@ if __name__ == "__main__":
     for year, resource_id in resources.items():
 
         if arguments.full:
-            results[year] = download_disease_full(
-                year, resource_id, arguments.overwrite
-            )
+            try:
+                status, path = download_disease_full(
+                    year, resource_id, version=arguments.version
+                )
+                results[year] = True
+            except (requests.exceptions.RequestException, RuntimeError,
+                    FileExistsError, ValueError) as error:
+                print(f"Error: {error}")
+                results[year] = False
         else:
             results[year] = extract_disease_sample(
                 year,

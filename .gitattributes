@@ -1,0 +1,5 @@
+# Power BI Desktop writes its project files with CRLF on every save; store them
+# normalized and check them out as CRLF so a save in Desktop is not a diff.
+powerbi/*.pbip                          text eol=crlf
+powerbi/DiseaseSurveillance.Report/**   text eol=crlf
+powerbi/DiseaseSurveillance.SemanticModel/** text eol=crlf

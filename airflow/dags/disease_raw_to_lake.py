@@ -1,4 +1,4 @@
-"""Validate the extracted disease data (full CSV or API sample) and land it in the S3 raw zone."""
+"""Weekly: download the disease CSVs as new raw versions, validate, and land them in the S3 raw zone."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import boto3
+import pendulum
 from boto3.s3.transfer import TransferConfig
 from botocore.exceptions import ClientError
 from airflow import DAG  # pyright: ignore[reportAttributeAccessIssue, reportMissingImports]
@@ -118,15 +119,18 @@ def _validate_disease_csv(source: Path) -> int:
 
 
 def _disease_source(year: str) -> Path:
-    """Prefer the full CSV download; fall back to the 100-record API sample."""
+    """Newest full download (disease_cases_{year}_full_YYYYMMDD.csv), else the
+    legacy unversioned full file, else the 100-record API sample."""
+    from spark.raw_versions import latest_per_year  # project package on PYTHONPATH
+
     base = Path(os.environ["RAW_DATA_DIR"]) / "disease"
-    for name in (f"disease_cases_{year}_full.csv", f"disease_cases_{year}_sample.json"):
-        if (base / name).is_file():
-            return base / name
-    raise FileNotFoundError(
-        f"Required raw input is missing for {year}: disease_cases_{year}_full.csv "
-        f"or disease_cases_{year}_sample.json"
-    )
+    chosen = latest_per_year(str(path) for path in base.glob(f"disease_cases_{year}_*"))
+    if year not in chosen:
+        raise FileNotFoundError(
+            f"Required raw input is missing for {year}: disease_cases_{year}_full_*.csv "
+            f"or disease_cases_{year}_sample.json"
+        )
+    return Path(chosen[year])
 
 
 def _file_sha256(source: Path) -> str:
@@ -201,6 +205,29 @@ def land_disease(year: str):
         ContentType=JSON_CONTENT_TYPE,
     )
     print(f"Landed {record_count} records: s3://{bucket}/{key}; sha256={digest}")
+
+
+def _env_flag(name: str, default: str) -> bool:
+    return os.environ.get(name, default).strip().lower() in {"1", "true", "yes"}
+
+
+def download_disease(year: str):
+    """Download the year's full CSV as a new raw version (same code as the CLI).
+
+    Skipped when downloads are disabled or no Data.go.th token is configured;
+    the land task then uses the newest file already on disk.
+    """
+    if not _env_flag("DOWNLOAD_DISEASE", "true"):
+        raise AirflowSkipException("DOWNLOAD_DISEASE is off; landing files already on disk")
+    if not os.environ.get("DATA_GO_TH_TOKEN"):
+        raise AirflowSkipException("DATA_GO_TH_TOKEN not set; landing files already on disk")
+
+    from src.extract.extract_disease import RESOURCES, download_disease_full
+
+    status, path = download_disease_full(
+        year, RESOURCES[year], raw_dir=Path(os.environ["RAW_DATA_DIR"]) / "disease"
+    )
+    print(f"{year}: {status} -> {path.name}")
 
 
 def population_required() -> bool:
@@ -339,8 +366,9 @@ def land_population(year: str):
 with DAG(
     dag_id="disease_raw_to_lake",
     description="Validate disease data (full CSV or API sample) and population, land immutable raw objects in S3",
-    start_date=datetime(2026, 1, 1),
-    schedule=None,
+    # Weekly refresh: the source CSVs are updated in place by the publisher.
+    start_date=pendulum.datetime(2026, 1, 1, tz="Asia/Bangkok"),
+    schedule="0 6 * * 1",
     catchup=False,
     max_active_runs=1,
     default_args={"owner": "data-platform", "retries": 2},
@@ -348,12 +376,20 @@ with DAG(
 ) as dag:
     create_bucket = PythonOperator(task_id="ensure_raw_bucket", python_callable=ensure_bucket)
     for data_year in YEARS:
+        download = PythonOperator(
+            task_id=f"download_disease_{data_year}",
+            python_callable=download_disease,
+            op_kwargs={"year": data_year},
+        )
         upload = PythonOperator(
             task_id=f"land_disease_{data_year}",
             python_callable=land_disease,
             op_kwargs={"year": data_year},
+            # Land the newest file on disk even if today's download was
+            # skipped or failed (the failed download stays red in the UI).
+            trigger_rule="all_done",
         )
-        create_bucket >> upload  # pyright: ignore[reportUnusedExpression]
+        create_bucket >> download >> upload  # pyright: ignore[reportUnusedExpression]
         population_upload = PythonOperator(
             task_id=f"land_population_{data_year}",
             python_callable=land_population,

@@ -169,3 +169,37 @@ def test_disease_source_prefers_full_csv(raw_dag_module, tmp_path, monkeypatch):
 
     with pytest.raises(FileNotFoundError):
         raw_dag_module._disease_source("2569")
+
+
+def test_disease_source_picks_newest_versioned_download(raw_dag_module, tmp_path, monkeypatch):
+    disease_dir = tmp_path / "disease"
+    disease_dir.mkdir()
+    for name in ("disease_cases_2569_full.csv",
+                 "disease_cases_2569_full_20261008.csv",
+                 "disease_cases_2569_full_20261102.csv"):
+        (disease_dir / name).write_text("h")
+    monkeypatch.setenv("RAW_DATA_DIR", str(tmp_path))
+
+    assert raw_dag_module._disease_source("2569").name == "disease_cases_2569_full_20261102.csv"
+
+
+def test_raw_dag_downloads_weekly_before_landing(dagbag):
+    dag = dagbag.get_dag("disease_raw_to_lake")
+
+    assert dag.timetable.summary == "0 6 * * 1"
+    assert str(dag.timezone.name) == "Asia/Bangkok"
+    for year in ("2568", "2569"):
+        land = dag.get_task(f"land_disease_{year}")
+        assert f"download_disease_{year}" in land.upstream_task_ids
+        # A failed or skipped download must not stop landing the files on disk.
+        assert land.trigger_rule == "all_done"
+
+
+def test_download_is_skipped_without_token(raw_dag_module, monkeypatch):
+    from airflow.exceptions import AirflowSkipException
+
+    monkeypatch.delenv("DATA_GO_TH_TOKEN", raising=False)
+    monkeypatch.setenv("DOWNLOAD_DISEASE", "true")
+
+    with pytest.raises(AirflowSkipException):
+        raw_dag_module.download_disease("2569")

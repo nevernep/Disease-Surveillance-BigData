@@ -28,22 +28,23 @@ Data.go.th API → Raw JSON → Data Lake (S3) → Airflow → Spark (Clean/DQ) 
 ## สถาปัตยกรรม
 
 ```text
-┌──────────────────────┐
-│ Data.go.th REST API  │  src/extract/extract_disease.py (token ใน .env)
-└──────────┬───────────┘
-           │ Raw JSON  data/raw/disease/
+┌──────────────────────────┐
+│ data.bangkok.go.th (CSV) │  URL จาก Data.go.th API (token ใน .env)
+└──────────┬───────────────┘
+           │ disease_cases_{ปี}_full_{YYYYMMDD}.csv  (data/raw/disease/)
            ▼
-┌──────────────────────────────────────────────────────────────┐
-│ Apache Airflow (Docker, LocalExecutor)                        │
-│                                                               │
-│  DAG disease_raw_to_lake                                      │
-│   ensure bucket → land_disease_{ปี} (ตรวจ 16 fields, SHA-256)  │
-│                 → land_population_{ปี} (ข้ามได้: cases-only)   │
-│                 → trigger spark_processing                    │
-│                                                               │
-│  DAG spark_processing                                         │
-│   run_spark_pipeline → load_warehouse                         │
-└──────────┬──────────────────────────────┬────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│ Apache Airflow (Docker, LocalExecutor)                            │
+│                                                                   │
+│  DAG disease_raw_to_lake   ทุกวันจันทร์ 06:00 (เวลาไทย)            │
+│   ensure bucket → download_disease_{ปี} (เวอร์ชันใหม่เมื่อข้อมูลเปลี่ยน) │
+│                 → land_disease_{ปี}    (ตรวจ 15 fields, SHA-256)   │
+│                 → land_population_{ปี} (ข้ามได้: cases-only)       │
+│                 → trigger spark_processing                        │
+│                                                                   │
+│  DAG spark_processing                                             │
+│   run_spark_pipeline → load_warehouse                             │
+└──────────┬──────────────────────────────┬────────────────────────┘
            ▼                              ▼
 ┌──────────────────────┐       ┌───────────────────────────────┐
 │ Data Lake (SeaweedFS,│       │ Apache Spark 3.5 (PySpark)    │
@@ -59,7 +60,7 @@ Data.go.th API → Raw JSON → Data Lake (S3) → Airflow → Spark (Clean/DQ) 
                                │ + fact_population + views     │
                                └──────────────┬────────────────┘
                                               ▼
-                                         Power BI
+                              Power BI (.pbip) · Dashboard :8501
 ```
 
 | Service | หน้าที่ | Port (เครื่อง local) |
@@ -80,7 +81,7 @@ Data.go.th API → Raw JSON → Data Lake (S3) → Airflow → Spark (Clean/DQ) 
 # 1) ตั้งค่า: คัดลอกค่าตั้งต้นแล้วใส่ DATA_GO_TH_TOKEN (ห้าม commit .env)
 Copy-Item .env.example .env
 
-# 2) ดึงข้อมูล: ไฟล์เต็ม (ปีละ 1 คำขอ ~80–90 MB) หรือ sample 100 records/ปี
+# 2) (ไม่บังคับ) ดึงข้อมูลเองจากเครื่อง — DAG ดาวน์โหลดให้อัตโนมัติอยู่แล้วถ้ามี token
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
@@ -90,7 +91,7 @@ python src\extract\extract_disease.py          # หรือ sample จาก A
 # 3) เปิดระบบ
 docker compose up -d --build
 
-# 4) รัน pipeline ทั้งเส้น (raw → lake → spark → warehouse)
+# 4) รัน pipeline ทั้งเส้นทันที (ปกติรันเองทุกวันจันทร์ 06:00): download → raw → lake → spark → warehouse
 docker compose exec airflow airflow dags unpause disease_raw_to_lake
 docker compose exec airflow airflow dags unpause spark_processing
 docker compose exec airflow airflow dags trigger disease_raw_to_lake
@@ -113,10 +114,12 @@ docker compose exec airflow airflow dags trigger spark_processing
 
 | ตัวแปร | ค่าตั้งต้น | ความหมาย |
 |---|---|---|
-| `DATA_GO_TH_TOKEN` | — | token ของ Data.go.th ใช้เฉพาะสคริปต์ extract |
+| `DATA_GO_TH_TOKEN` | — | token ของ Data.go.th ใช้ทั้งสคริปต์ extract และ task ดาวน์โหลดใน Airflow (ไม่มี token = ข้ามการดาวน์โหลด ใช้ไฟล์ที่มีอยู่) |
+| `DOWNLOAD_DISEASE` | `true` | ให้ DAG ดาวน์โหลดข้อมูลผู้ป่วยรอบใหม่ทุกครั้งที่รัน |
 | `REQUIRE_POPULATION` | `false` | `false` = **cases-only mode** (ไม่มีข้อมูลประชากรก็รันได้ incidence จะว่าง), `true` = บังคับต้องมีข้อมูลประชากร 50 เขต |
 | `DATA_LAKE_URI` | `s3a://disease-surveillance` | Spark อ่าน/เขียนผ่าน Data Lake; ตั้งเป็นค่าว่างเพื่อใช้ไฟล์ในเครื่อง |
 | `SPARK_MASTER` | `local[2]` | จำนวน core ของ Spark (จำกัดไว้เพื่อให้ Airflow UI ไม่ล่ม) |
+| `SPARK_DRIVER_MEMORY` | `1g` | heap ของ Spark เพิ่มเป็น `2g` ได้ถ้า Docker มี RAM ≥ 6 GB |
 | `WAREHOUSE_DB_*` | ดู `.env.example` | การเชื่อมต่อ PostgreSQL Warehouse |
 
 ---
@@ -128,12 +131,13 @@ Disease-Surveillance-BigData/
 ├── airflow/
 │   ├── Dockerfile                 Airflow 2.10 + Java 17 + PySpark + S3A jars
 │   └── dags/
-│       ├── disease_raw_to_lake.py ตรวจ raw ตาม data contract แล้ว land ลง S3
+│       ├── disease_raw_to_lake.py รายสัปดาห์: ดาวน์โหลด → ตรวจ data contract → land ลง S3
 │       └── spark_processing.py    รัน Spark แล้วโหลด warehouse
 ├── spark/
 │   ├── main.py                    entry point ของ pipeline (10 ขั้น)
 │   ├── config.py                  path (local / s3a), SparkSession, S3A config
 │   ├── readers.py                 อ่าน raw จากเครื่องหรือ Data Lake
+│   ├── raw_versions.py            เลือกไฟล์ดิบเวอร์ชันล่าสุดต่อปี (ใช้ร่วมกับ extract และ DAG)
 │   ├── cleaners.py                canonical schema, กฎ clean/quarantine ชุดเดียว
 │   ├── deduplication.py           case_id + ลบข้อมูลซ้ำ
 │   ├── standardizers.py           ชื่อเขต ชื่อโรค เพศ กลุ่มอายุ
@@ -143,17 +147,24 @@ Disease-Surveillance-BigData/
 │   ├── data_quality.py            กฎ Data Quality + กระทบยอด warehouse
 │   ├── writers.py                 เขียน Parquet/CSV
 │   ├── load_warehouse.py          โหลด PostgreSQL ใน transaction เดียว
+│   ├── export_powerbi.py          export warehouse เป็น Excel สำหรับ Power BI บนเว็บ
 │   ├── prepare_population_reference.py   เตรียม CSV ประชากร 50 เขตจากแหล่งทางการ
 │   └── validate_population_reference.py  ตรวจ CSV ประชากรที่เตรียมแล้ว
 ├── sql/
 │   ├── ddl.sql                    schema mart (PK/FK/CHECK)
-│   └── analytics_views.sql        semantic views สำหรับ BI
-├── src/extract/                   ดึงข้อมูลจาก API และ profiling
+│   ├── analytics_views.sql        semantic views สำหรับ BI
+│   └── demo_queries.sql           11 คำสั่งสาธิต (กระทบยอด, อัตราป่วย, แนวโน้ม, DQ)
+├── src/extract/                   ดาวน์โหลดข้อมูล (CLI และ Airflow) และ profiling
+├── dashboard/                     เว็บ dashboard (app.py + index.html) อ่าน warehouse สด
 ├── tests/                         unit tests (pytest)
-├── powerbi/                       DAX measures, layout, theme
+├── powerbi/
+│   ├── DiseaseSurveillance.pbip   รายงาน Power BI Desktop (โมเดล + 5 หน้า)
+│   ├── semantic_model.tmdl        สคริปต์โมเดลสำหรับ TMDL view
+│   ├── build_report.py            สร้างหน้ารายงาน 5 หน้า
+│   └── measures.dax, theme.json, report_layout.md
 ├── docs/                          data sources, data contract, lake/airflow, Power BI
 ├── data/                          (ไม่ commit ยกเว้น data/raw/disease/reference/)
-│   ├── raw/disease/               disease_cases_{ปี}_sample.json
+│   ├── raw/disease/               disease_cases_{ปี}_full_{YYYYMMDD}.csv (เวอร์ชันละไฟล์), sample .json
 │   │   └── reference/             population_summary_{ปี}.csv
 │   ├── raw/reference/             Excel ประชากรเขตบึงกุ่ม (ต้นฉบับ)
 │   └── processed/                 CSV สำหรับ BI และรายงาน DQ
@@ -167,7 +178,7 @@ Disease-Surveillance-BigData/
 ```text
 s3://disease-surveillance/
 ├── raw/
-│   ├── disease/year={ปี}/disease_cases_{ปี}_sample.json  (+ _metadata/*.manifest.json)
+│   ├── disease/year={ปี}/disease_cases_{ปี}_full_{YYYYMMDD}.csv  ทุกเวอร์ชัน (+ _metadata/*.manifest.json)
 │   └── population/year={ปี}/population_summary_{ปี}.csv
 └── processed/
     ├── clean/  quarantine/  standardized/
@@ -323,7 +334,8 @@ Raw Data ต้องคงค่าตามต้นทาง ห้ามเ�
 | Raw zone บน Data Lake + Airflow | ✅ ใช้งานได้ |
 | Spark อ่าน/เขียนผ่าน Data Lake + DQ | ✅ ใช้งานได้ |
 | PostgreSQL Warehouse + views | ✅ ใช้งานได้ |
-| Unit tests | ✅ 57 tests |
+| Unit tests | ✅ 70+ tests (`pytest`) |
+| ดาวน์โหลดอัตโนมัติรายสัปดาห์ + เก็บข้อมูลดิบทุกเวอร์ชัน | ✅ DAG `disease_raw_to_lake` ทุกวันจันทร์ 06:00 |
 | ข้อมูลประชากร 50 เขต (incidence rate) | ✅ ปี 2568 (31 ธ.ค. 2567, กรมการปกครอง) และปี 2569 (มิ.ย. 2569, สำนักงานปกครองและทะเบียน กทม.) |
 | ข้อมูลเต็ม (473,529 records, มิ.ย. 2025 – ก.ย. 2026) | ✅ รันผ่านทั้ง pipeline |
 | ไฟล์ Excel สำหรับ Power BI | ✅ `spark/export_powerbi.py` |

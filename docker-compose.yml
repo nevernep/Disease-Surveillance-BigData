@@ -104,6 +104,9 @@ services:
       DATA_LAKE_URI: ${DATA_LAKE_URI-s3a://${DATA_LAKE_BUCKET:-disease-surveillance}}
       RAW_DATA_DIR: /opt/airflow/project/data/raw
       REQUIRE_POPULATION: ${REQUIRE_POPULATION:-false}
+      # Weekly download in the disease_raw_to_lake DAG (skipped without a token).
+      DATA_GO_TH_TOKEN: ${DATA_GO_TH_TOKEN:-}
+      DOWNLOAD_DISEASE: ${DOWNLOAD_DISEASE:-true}
       WAREHOUSE_DB_HOST: warehouse-db
       WAREHOUSE_DB_PORT: "5432"
       WAREHOUSE_DB_NAME: ${WAREHOUSE_DB_NAME:-surveillance_dw}
@@ -114,7 +117,9 @@ services:
       - "8080:8080"
     volumes:
       - ./airflow/dags:/opt/airflow/dags
-      - ./data/raw:/opt/airflow/project/data/raw:ro
+      # Read-write: the weekly download task saves new raw versions here.
+      - ./data/raw:/opt/airflow/project/data/raw
+      - ./src:/opt/airflow/project/src:ro
       - ./data/processed:/opt/airflow/project/data/processed
       - ./spark:/opt/airflow/project/spark:ro
       - ./sql:/opt/airflow/project/sql:ro

@@ -1,6 +1,6 @@
 import re
 from pathlib import Path
-from typing import Dict, Iterable, List, Tuple
+from typing import List
 
 import pandas as pd
 from pyspark.sql import DataFrame, SparkSession
@@ -8,39 +8,14 @@ from pyspark.sql import functions as F
 from pyspark.sql.types import ArrayType
 
 from spark.cleaners import find_column
+# One file per year (newest full download, else the API sample); shared with
+# the extract script and the raw-landing DAG.
+from spark.raw_versions import select_disease_files  # noqa: F401 (re-exported)
 from spark.schemas import POPULATION_COLUMN_ALIASES
 
 NESTED_RECORD_KEYS = ["data", "records", "result", "results", "items"]
 PATH_NOT_FOUND_MARKERS = ("PATH_NOT_FOUND", "Path does not exist")
 CSV_ENCODINGS = ["utf-8-sig", "utf-8", "cp874", "tis-620"]
-
-# disease_cases_{year}_{full|sample}.{csv|json}
-DISEASE_FILE_PATTERN = re.compile(
-    r"disease_cases_(\d{4})_(full|sample)\.(csv|json)$"
-)
-# Lower rank wins: the full download replaces the 100-record API sample.
-DISEASE_KIND_RANK = {"full": 0, "sample": 1}
-
-
-def select_disease_files(paths: Iterable[str]) -> List[str]:
-    """เลือกไฟล์ Disease ปีละ 1 ไฟล์: ใช้ _full ก่อน _sample
-
-    ป้องกันการนับผู้ป่วยซ้ำเมื่อมีทั้งไฟล์ sample และไฟล์เต็มของปีเดียวกัน
-    """
-
-    chosen: Dict[str, Tuple[int, str]] = {}
-
-    for path in paths:
-        match = DISEASE_FILE_PATTERN.search(str(path))
-        if match is None:
-            continue
-        year, kind = match.group(1), match.group(2)
-        rank = DISEASE_KIND_RANK[kind]
-        if year not in chosen or rank < chosen[year][0]:
-            chosen[year] = (rank, str(path))
-
-    return [chosen[year][1] for year in sorted(chosen)]
-
 
 def _strip_bom_columns(dataframe: DataFrame) -> DataFrame:
     for column in dataframe.columns:

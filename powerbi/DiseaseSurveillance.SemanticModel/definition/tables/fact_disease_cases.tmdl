@@ -1,0 +1,172 @@
+/// Cases per month × district × disease × age group × sex.
+table fact_disease_cases
+	lineageTag: d5b11acc-f177-4572-848a-914ec5955db2
+
+	measure 'Total Cases' = SUM(fact_disease_cases[total_cases])
+		formatString: #,0
+		lineageTag: 4b02f9dc-af7a-4526-81b6-f2e0eeaf4cb5
+
+	measure 'Source Records' = SUM(fact_disease_cases[source_records])
+		formatString: #,0
+		lineageTag: 69ba3998-dcef-4d8e-8753-ea8e4bed6a18
+
+	/// Year from dim_date via TREATAS; disease/age/sex filters never
+	/// reach fact_population, so every district in scope is counted.
+	measure Population =
+			CALCULATE(
+				SUM(fact_population[population]),
+				TREATAS(VALUES(dim_date[year_be]), fact_population[year_be])
+			)
+		formatString: #,0
+		lineageTag: 227cbb82-3d4f-48a6-a789-0e250423d0d6
+
+	/// Blank when sliced by age group or sex: no population by age/sex.
+	measure 'Incidence Rate per 100k' =
+			IF(
+				ISFILTERED(dim_age_group) || ISFILTERED(dim_sex),
+				BLANK(),
+				DIVIDE([Total Cases] * 100000, [Population])
+			)
+		formatString: #,0.00
+		lineageTag: ec935561-bf9c-462f-9bbe-f44a29f8a324
+
+	measure 'Population Coverage %' =
+			VAR DistrictsInScope =
+				CALCULATE(
+					DISTINCTCOUNT(dim_district[district_key]),
+					dim_district[is_bangkok_district] = TRUE()
+				)
+			VAR DistrictsWithPopulation =
+				CALCULATE(
+					DISTINCTCOUNT(fact_population[district_key]),
+					TREATAS(VALUES(dim_date[year_be]), fact_population[year_be]),
+					dim_district[is_bangkok_district] = TRUE()
+				)
+			RETURN
+				DIVIDE(DistrictsWithPopulation, DistrictsInScope)
+		formatString: 0.0%
+		lineageTag: 2ac29229-db32-4932-864b-245a5179f3af
+
+	measure 'Population Coverage Status' =
+			IF(
+				[Population Coverage %] >= 1,
+				"ครบถ้วน",
+				"ไม่มี/ไม่ครบ — แสดงเฉพาะจำนวนผู้ป่วย"
+			)
+		lineageTag: 535c029a-60a2-4f76-bf53-b89d69ff61d7
+
+	measure 'Case Share %' =
+			DIVIDE(
+				[Total Cases],
+				CALCULATE([Total Cases], ALL(dim_age_group), ALL(dim_sex))
+			)
+		formatString: 0.0%
+		lineageTag: a6369a35-7e04-40fd-8df3-b72afa0ba026
+
+	measure 'District Rank' =
+			RANKX(
+				ALLSELECTED(dim_district[district_name]),
+				[Total Cases],
+				,
+				DESC,
+				Dense
+			)
+		formatString: 0
+		lineageTag: 4b681ec6-db6c-4071-83a4-1f75ca346e28
+
+	/// dim_date is monthly, so month shifts use EDATE instead of
+	/// time-intelligence functions that need a daily date table.
+	measure 'Cases Previous Month' =
+			VAR CurrentMonth = MAX(dim_date[month_start])
+			RETURN
+				CALCULATE(
+					[Total Cases],
+					REMOVEFILTERS(dim_date),
+					dim_date[month_start] = EDATE(CurrentMonth, -1)
+				)
+		formatString: #,0
+		lineageTag: 8c8f71ae-5a04-4a3a-a29d-c81a73165f8d
+
+	measure 'Month over Month Cases %' = DIVIDE([Total Cases] - [Cases Previous Month], [Cases Previous Month])
+		formatString: +0.0%;-0.0%;0.0%
+		lineageTag: 29dfddd8-952b-426b-99df-6b9ea628b606
+
+	measure 'Cases Same Month Last Year' =
+			VAR CurrentMonth = MAX(dim_date[month_start])
+			RETURN
+				CALCULATE(
+					[Total Cases],
+					REMOVEFILTERS(dim_date),
+					dim_date[month_start] = EDATE(CurrentMonth, -12)
+				)
+		formatString: #,0
+		lineageTag: a5506b51-d25d-464b-8ff3-162ce0184f93
+
+	measure 'Year over Year Cases %' =
+			DIVIDE(
+				[Total Cases] - [Cases Same Month Last Year],
+				[Cases Same Month Last Year]
+			)
+		formatString: +0.0%;-0.0%;0.0%
+		lineageTag: 99d0fc87-946b-4080-a286-a49db13cf878
+
+	column date_key
+		dataType: int64
+		isHidden
+		lineageTag: 7f381115-f50b-44ee-b899-874d44f02477
+		summarizeBy: none
+		sourceColumn: date_key
+
+	column district_key
+		dataType: int64
+		isHidden
+		lineageTag: ee5523b0-252f-453e-912d-dfb3c9490798
+		summarizeBy: none
+		sourceColumn: district_key
+
+	column disease_key
+		dataType: int64
+		isHidden
+		lineageTag: 4b06bbfd-cda4-448a-8615-34fe76e4a9e2
+		summarizeBy: none
+		sourceColumn: disease_key
+
+	column age_group_key
+		dataType: int64
+		isHidden
+		lineageTag: 682351a2-3fc9-44e8-8a74-77caa21c0996
+		summarizeBy: none
+		sourceColumn: age_group_key
+
+	column sex
+		dataType: string
+		isHidden
+		lineageTag: 7482a970-191d-4639-a29c-98a61cf4f5ce
+		summarizeBy: none
+		sourceColumn: sex
+
+	column total_cases
+		dataType: int64
+		formatString: #,0
+		lineageTag: ccd0dd29-bfdd-4f8d-ab09-a4a7cad7f69b
+		summarizeBy: sum
+		sourceColumn: total_cases
+
+	column source_records
+		dataType: int64
+		formatString: #,0
+		lineageTag: de799c07-35a9-4cf6-be45-fd7a86b11335
+		summarizeBy: sum
+		sourceColumn: source_records
+
+	partition fact_disease_cases = m
+		mode: import
+		source =
+				let
+					Source = PostgreSQL.Database(DwServer, DwDatabase),
+					Data = Source{[Schema = "mart", Item = "fact_disease_cases"]}[Data]
+				in
+					Data
+
+	annotation PBI_ResultType = Table
+

@@ -1,0 +1,42 @@
+table dim_age_group
+	lineageTag: 60a11689-0ad7-47d6-b0c4-d75e877e3cf8
+
+	column age_group_key
+		dataType: int64
+		isHidden
+		lineageTag: 1e994c77-ade3-4fce-934b-edc00c44368a
+		summarizeBy: none
+		sourceColumn: age_group_key
+
+	column age_group
+		dataType: string
+		lineageTag: 070997f2-9adc-4cf7-a69b-e07bae8c2160
+		summarizeBy: none
+		sourceColumn: age_group
+		sortByColumn: age_group_key
+
+	column min_age
+		dataType: int64
+		isHidden
+		lineageTag: 6679a886-e1b4-495d-a6df-22c61f04f297
+		summarizeBy: none
+		sourceColumn: min_age
+
+	column max_age
+		dataType: int64
+		isHidden
+		lineageTag: 37fc271f-34e4-4734-913e-08c103e55487
+		summarizeBy: none
+		sourceColumn: max_age
+
+	partition dim_age_group = m
+		mode: import
+		source =
+				let
+					Source = PostgreSQL.Database(DwServer, DwDatabase),
+					Data = Source{[Schema = "mart", Item = "dim_age_group"]}[Data]
+				in
+					Data
+
+	annotation PBI_ResultType = Table
+

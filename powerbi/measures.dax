@@ -60,14 +60,28 @@ RANKX(
     Dense
 )
 
+// dim_date is monthly: shift months with EDATE instead of time-intelligence
+// functions (DATEADD/SAMEPERIODLASTYEAR need a daily, marked date table).
 Cases Previous Month =
-CALCULATE([Total Cases], DATEADD(dim_date[month_start], -1, MONTH))
+VAR CurrentMonth = MAX(dim_date[month_start])
+RETURN
+    CALCULATE(
+        [Total Cases],
+        REMOVEFILTERS(dim_date),
+        dim_date[month_start] = EDATE(CurrentMonth, -1)
+    )
 
 Month over Month Cases % =
 DIVIDE([Total Cases] - [Cases Previous Month], [Cases Previous Month])
 
 Cases Same Month Last Year =
-CALCULATE([Total Cases], SAMEPERIODLASTYEAR(dim_date[month_start]))
+VAR CurrentMonth = MAX(dim_date[month_start])
+RETURN
+    CALCULATE(
+        [Total Cases],
+        REMOVEFILTERS(dim_date),
+        dim_date[month_start] = EDATE(CurrentMonth, -12)
+    )
 
 Year over Year Cases % =
 DIVIDE(

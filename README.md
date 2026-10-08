@@ -241,7 +241,9 @@ Views: `vw_monthly_trend`, `vw_year_disease`, `vw_district_disease_year`, `vw_di
   docker compose exec airflow bash -c "cd /opt/airflow/project && python -m spark.export_powerbi"
   # → data/processed/powerbi/disease_surveillance_powerbi.xlsx
   ```
-- **Power BI Desktop**: ต่อ PostgreSQL `localhost:5433` ตรง ดู [docs/powerbi_dashboard.md](docs/powerbi_dashboard.md)
+- **Power BI Desktop (รายงานสำเร็จรูป)**: เปิด `powerbi/DiseaseSurveillance.pbip` ได้เลย มีโมเดลและรายงาน 5 หน้า
+  ดึงข้อมูลจาก PostgreSQL `localhost:5433` ตรง (ครั้งแรกให้กด **รีเฟรช** แล้วใส่ `dw_user` / `warehouse-local-only`)
+  รายละเอียดอยู่ใน [docs/powerbi_dashboard.md](docs/powerbi_dashboard.md)
 
 ---
 
@@ -323,7 +325,7 @@ Raw Data ต้องคงค่าตามต้นทาง ห้ามเ�
 | ข้อมูลประชากร 50 เขต (incidence rate) | ✅ ปี 2569 (มิ.ย. 2569) / ⏳ ปี 2568 ใช้ปี 2569 แทนจนกว่าจะได้ไฟล์ทางการ |
 | ข้อมูลเต็ม (473,529 records, มิ.ย. 2025 – ก.ย. 2026) | ✅ รันผ่านทั้ง pipeline |
 | ไฟล์ Excel สำหรับ Power BI | ✅ `spark/export_powerbi.py` |
-| รายงาน Power BI | ⏳ กำลังทำบน Power BI Service ตาม [docs/powerbi_web_guide.md](docs/powerbi_web_guide.md) |
+| รายงาน Power BI | ✅ `powerbi/DiseaseSurveillance.pbip` (Desktop, 5 หน้า) และคู่มือสำหรับ Power BI บนเว็บ |
 
 ---
 

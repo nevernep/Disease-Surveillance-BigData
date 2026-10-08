@@ -1,0 +1,36 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
+  "name": "f44d6a2eb2c231379600",
+  "position": {
+    "x": 340,
+    "y": 70,
+    "z": 2000,
+    "height": 110,
+    "width": 920,
+    "tabOrder": 2000
+  },
+  "visual": {
+    "visualType": "textbox",
+    "objects": {
+      "general": [
+        {
+          "properties": {
+            "paragraphs": [
+              {
+                "textRuns": [
+                  {
+                    "value": "PASS = ผ่าน, FAIL = ไม่ผ่าน (pipeline หยุด), SKIP = rule ไม่ใช้ในโหมดที่รัน ข้อมูลจาก Spark รอบล่าสุดที่โหลดเข้า warehouse",
+                    "textStyle": {
+                      "fontSize": "11pt"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "drillFilterOtherVisuals": true
+  }
+}

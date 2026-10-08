@@ -1,0 +1,36 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
+  "name": "301409208235e59c86f0",
+  "position": {
+    "x": 20,
+    "y": 605,
+    "z": 3000,
+    "height": 105,
+    "width": 760,
+    "tabOrder": 3000
+  },
+  "visual": {
+    "visualType": "textbox",
+    "objects": {
+      "general": [
+        {
+          "properties": {
+            "paragraphs": [
+              {
+                "textRuns": [
+                  {
+                    "value": "อัตราป่วยต่อแสนประชากรไม่แสดงในหน้านี้ เพราะไม่มีข้อมูลประชากรแยกอายุ/เพศ จึงแสดงเป็นจำนวนและสัดส่วนผู้ป่วยแทน",
+                    "textStyle": {
+                      "fontSize": "10pt"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "drillFilterOtherVisuals": true
+  }
+}

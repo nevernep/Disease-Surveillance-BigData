@@ -1,0 +1,24 @@
+relationship fact_cases_to_date
+	fromColumn: fact_disease_cases.date_key
+	toColumn: dim_date.date_key
+
+relationship fact_cases_to_district
+	fromColumn: fact_disease_cases.district_key
+	toColumn: dim_district.district_key
+
+relationship fact_cases_to_disease
+	fromColumn: fact_disease_cases.disease_key
+	toColumn: dim_disease.disease_key
+
+relationship fact_cases_to_age_group
+	fromColumn: fact_disease_cases.age_group_key
+	toColumn: dim_age_group.age_group_key
+
+relationship fact_cases_to_sex
+	fromColumn: fact_disease_cases.sex
+	toColumn: dim_sex.sex
+
+relationship fact_population_to_district
+	fromColumn: fact_population.district_key
+	toColumn: dim_district.district_key
+

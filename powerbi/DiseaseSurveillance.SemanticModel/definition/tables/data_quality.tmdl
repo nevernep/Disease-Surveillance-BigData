@@ -1,0 +1,45 @@
+/// Spark Data Quality report (standalone, no relationships).
+table data_quality
+	lineageTag: 961748de-ed8c-4f6d-ad24-72ba28db5da1
+
+	column layer
+		dataType: string
+		lineageTag: 49344b49-6fe5-46cf-9028-cb89c2e92a33
+		summarizeBy: none
+		sourceColumn: layer
+
+	column rule
+		dataType: string
+		lineageTag: 7ea0d576-a4f6-494a-9825-d7c7f40598fc
+		summarizeBy: none
+		sourceColumn: rule
+
+	column observed
+		dataType: string
+		lineageTag: 9678d200-52ec-4496-9476-94800501df41
+		summarizeBy: none
+		sourceColumn: observed
+
+	column threshold
+		dataType: string
+		lineageTag: 6d8d2dfd-13f8-4f07-8568-3a48708a917c
+		summarizeBy: none
+		sourceColumn: threshold
+
+	column status
+		dataType: string
+		lineageTag: 8de14bb0-f8fe-4b2e-aa27-2ee6b255e046
+		summarizeBy: none
+		sourceColumn: status
+
+	partition data_quality = m
+		mode: import
+		source =
+				let
+					Source = PostgreSQL.Database(DwServer, DwDatabase),
+					Data = Source{[Schema = "mart", Item = "data_quality"]}[Data]
+				in
+					Data
+
+	annotation PBI_ResultType = Table
+

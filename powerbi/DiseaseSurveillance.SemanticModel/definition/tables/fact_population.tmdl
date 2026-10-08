@@ -1,0 +1,36 @@
+/// Incidence denominator: year × district (2568 borrows 2569, see SOURCES.md).
+table fact_population
+	lineageTag: 437825b4-2091-4fcb-b3e0-de1241f6da82
+
+	column year_be
+		dataType: int64
+		isHidden
+		lineageTag: 8f06a45a-dc56-4715-88c1-7b1932659453
+		summarizeBy: none
+		sourceColumn: year_be
+
+	column district_key
+		dataType: int64
+		isHidden
+		lineageTag: 992921e4-75cf-4498-b269-47923bcbad6f
+		summarizeBy: none
+		sourceColumn: district_key
+
+	column population
+		dataType: int64
+		formatString: #,0
+		lineageTag: f51b18d5-6d95-450f-808e-46a36145cd5d
+		summarizeBy: sum
+		sourceColumn: population
+
+	partition fact_population = m
+		mode: import
+		source =
+				let
+					Source = PostgreSQL.Database(DwServer, DwDatabase),
+					Data = Source{[Schema = "mart", Item = "fact_population"]}[Data]
+				in
+					Data
+
+	annotation PBI_ResultType = Table
+

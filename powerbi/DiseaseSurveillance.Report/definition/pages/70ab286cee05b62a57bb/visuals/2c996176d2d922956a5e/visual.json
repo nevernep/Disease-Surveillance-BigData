@@ -1,0 +1,36 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
+  "name": "2c996176d2d922956a5e",
+  "position": {
+    "x": 640,
+    "y": 540,
+    "z": 6000,
+    "height": 170,
+    "width": 620,
+    "tabOrder": 6000
+  },
+  "visual": {
+    "visualType": "textbox",
+    "objects": {
+      "general": [
+        {
+          "properties": {
+            "paragraphs": [
+              {
+                "textRuns": [
+                  {
+                    "value": "อัตราป่วยต่อแสนประชากรเป็นอัตราสะสมตามช่วงที่มีข้อมูล (2568: มิ.ย.–ธ.ค. 7 เดือน, 2569: ม.ค.–ก.ย. 9 เดือน) อย่าเทียบยอดรวมข้ามปีโดยตรง ตัวหารคือประชากรตามทะเบียนราษฎร มิ.ย. 2569 (ปี 2568 ใช้ค่าเดียวกัน) เขตชั้นในที่มีประชากรแฝงมากอาจมีอัตราสูงเกินจริง",
+                    "textStyle": {
+                      "fontSize": "10pt"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "drillFilterOtherVisuals": true
+  }
+}

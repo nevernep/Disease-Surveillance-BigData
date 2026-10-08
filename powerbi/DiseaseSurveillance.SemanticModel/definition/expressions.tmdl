@@ -1,0 +1,10 @@
+expression DwServer = "localhost:5433" meta [IsParameterQuery=true, Type="Text", IsParameterQueryRequired=true]
+	lineageTag: d54f6e59-76e5-488b-b4ef-8698d18d002b
+
+	annotation PBI_ResultType = Text
+
+expression DwDatabase = "surveillance_dw" meta [IsParameterQuery=true, Type="Text", IsParameterQueryRequired=true]
+	lineageTag: 55bac2a4-419c-4f82-8474-7ad76b1b9069
+
+	annotation PBI_ResultType = Text
+

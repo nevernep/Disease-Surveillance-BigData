@@ -1,0 +1,11 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Report",
+    "displayName": "DiseaseSurveillance"
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "45423a3b-b731-4530-887c-87871749c2a9"
+  }
+}

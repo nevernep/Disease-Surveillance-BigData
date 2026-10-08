@@ -1,0 +1,66 @@
+/// Monthly calendar from the first to the last onset month.
+table dim_date
+	lineageTag: e116bd44-0723-45ef-a6fe-58d3528ce5d1
+
+	column date_key
+		dataType: int64
+		isHidden
+		lineageTag: a0d843f9-2969-44b3-a4ee-ed1673d57e4c
+		summarizeBy: none
+		sourceColumn: date_key
+
+	column month_start
+		dataType: dateTime
+		formatString: yyyy-mm-dd
+		lineageTag: 8d96d887-f801-46ec-b4e8-c43b8f360ce0
+		summarizeBy: none
+		sourceColumn: month_start
+
+		annotation UnderlyingDateTimeDataType = Date
+
+	column year_be
+		dataType: int64
+		formatString: 0
+		lineageTag: 210b5cc2-e5fc-4a6f-a4d2-222b0cfef284
+		summarizeBy: none
+		sourceColumn: year_be
+
+	column year_ce
+		dataType: int64
+		formatString: 0
+		lineageTag: 8dd1d016-cdaf-4d06-b0a9-11f3edc46707
+		summarizeBy: none
+		sourceColumn: year_ce
+
+	column quarter
+		dataType: int64
+		formatString: 0
+		lineageTag: 3f64330a-b9d1-451c-b416-cc436c9bb7b5
+		summarizeBy: none
+		sourceColumn: quarter
+
+	column month
+		dataType: int64
+		formatString: 0
+		lineageTag: c1815ffb-7a7e-4f9b-9fdb-512ca7c47d34
+		summarizeBy: none
+		sourceColumn: month
+
+	column month_label
+		dataType: string
+		lineageTag: 37398e60-8871-4bb4-a914-5ee7ca4c7889
+		summarizeBy: none
+		sourceColumn: month_label
+		sortByColumn: month_start
+
+	partition dim_date = m
+		mode: import
+		source =
+				let
+					Source = PostgreSQL.Database(DwServer, DwDatabase),
+					Data = Source{[Schema = "mart", Item = "dim_date"]}[Data]
+				in
+					Data
+
+	annotation PBI_ResultType = Table
+

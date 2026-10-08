@@ -10,3 +10,7 @@ __pycache__/
 .vscode/
 .idea/
 .env
+# Power BI project: per-user settings, local data cache, TMDL view scratch scripts
+powerbi/**/.pbi/localSettings.json
+powerbi/**/.pbi/cache.abf
+powerbi/**/TMDLScripts/

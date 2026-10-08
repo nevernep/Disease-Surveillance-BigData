@@ -27,6 +27,8 @@ LOAD_ORDER = [
     "fact_disease_cases",
     "fact_population",
 ]
+# Loaded after the star schema; not related to other tables.
+QUALITY_TABLE = "data_quality"
 SCHEMA = "mart"
 
 
@@ -78,6 +80,10 @@ def load_warehouse(project_root: Path) -> Dict[str, int]:
     )
 
     sources = {table: warehouse_dir / f"{table}.csv" for table in LOAD_ORDER}
+    # The Spark DQ report, so BI tools read every table from the warehouse.
+    sources[QUALITY_TABLE] = (
+        project_root / "data" / "processed" / "quality" / "data_quality_report.csv"
+    )
     missing = [str(path) for path in sources.values() if not path.is_file()]
     if missing:
         raise FileNotFoundError(
@@ -92,7 +98,7 @@ def load_warehouse(project_root: Path) -> Dict[str, int]:
             with connection.cursor() as cursor:
                 cursor.execute(ddl_sql)
 
-                for table in LOAD_ORDER:
+                for table in [*LOAD_ORDER, QUALITY_TABLE]:
                     path = sources[table]
                     copy_sql = build_copy_sql(table, read_csv_header(path))
                     with path.open("r", encoding="utf-8") as source:

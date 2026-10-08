@@ -1,0 +1,26 @@
+model Model
+	culture: th-TH
+	defaultPowerBIDataSourceVersion: powerBI_V3
+	sourceQueryCulture: th-TH
+	valueFilterBehavior: independent
+	dataAccessOptions
+		legacyRedirects
+		returnErrorValuesAsNull
+
+annotation __PBI_TimeIntelligenceEnabled = 1
+
+annotation PBI_ProTooling = ["TMDLView_Desktop","DevMode"]
+
+annotation PBI_QueryOrder = ["fact_disease_cases","fact_population","dim_date","dim_district","dim_disease","dim_age_group","dim_sex","data_quality","DwServer","DwDatabase"]
+
+ref table fact_disease_cases
+ref table fact_population
+ref table dim_date
+ref table dim_district
+ref table dim_disease
+ref table dim_age_group
+ref table dim_sex
+ref table data_quality
+
+ref cultureInfo th-TH
+

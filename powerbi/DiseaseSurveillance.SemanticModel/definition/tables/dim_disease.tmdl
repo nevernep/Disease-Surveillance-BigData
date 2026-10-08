@@ -1,0 +1,27 @@
+table dim_disease
+	lineageTag: c877d8d6-e967-4e9c-9cd0-d0c0fa66e5f4
+
+	column disease_key
+		dataType: int64
+		isHidden
+		lineageTag: 7d1fc4e0-9e30-417d-ad77-83d3ebbebf5d
+		summarizeBy: none
+		sourceColumn: disease_key
+
+	column disease_name
+		dataType: string
+		lineageTag: 24224404-909d-45a8-9646-50fc44760f47
+		summarizeBy: none
+		sourceColumn: disease_name
+
+	partition dim_disease = m
+		mode: import
+		source =
+				let
+					Source = PostgreSQL.Database(DwServer, DwDatabase),
+					Data = Source{[Schema = "mart", Item = "dim_disease"]}[Data]
+				in
+					Data
+
+	annotation PBI_ResultType = Table
+

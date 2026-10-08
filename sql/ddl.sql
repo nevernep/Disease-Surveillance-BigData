@@ -14,7 +14,8 @@ DROP TABLE IF EXISTS
     mart.dim_district,
     mart.dim_disease,
     mart.dim_age_group,
-    mart.dim_sex
+    mart.dim_sex,
+    mart.data_quality
 CASCADE;  -- also drops the analytics views; the loader recreates them
 
 -- Monthly calendar; months without cases are present so trends show zeros.
@@ -77,6 +78,16 @@ CREATE TABLE mart.fact_population (
     district_key  INTEGER NOT NULL REFERENCES mart.dim_district (district_key),
     population    BIGINT  NOT NULL CHECK (population > 0),
     PRIMARY KEY (year_be, district_key)
+);
+
+-- Spark Data Quality report of the run that produced this load.
+CREATE TABLE mart.data_quality (
+    layer      TEXT NOT NULL,
+    rule       TEXT NOT NULL,
+    observed   TEXT,
+    threshold  TEXT,
+    status     TEXT NOT NULL CHECK (status IN ('PASS', 'FAIL', 'SKIP')),
+    PRIMARY KEY (layer, rule)
 );
 
 -- One row per successful load, for lineage and troubleshooting (never dropped).

@@ -1,0 +1,27 @@
+table dim_sex
+	lineageTag: a5c6bf44-3611-4b6a-94c8-a7d1b9fcca3a
+
+	column sex
+		dataType: string
+		isHidden
+		lineageTag: 7ac63fda-b4c4-48e5-80ba-dc4f5412fcd7
+		summarizeBy: none
+		sourceColumn: sex
+
+	column sex_label
+		dataType: string
+		lineageTag: 5e6faf73-a57e-4398-9088-10871a11920f
+		summarizeBy: none
+		sourceColumn: sex_label
+
+	partition dim_sex = m
+		mode: import
+		source =
+				let
+					Source = PostgreSQL.Database(DwServer, DwDatabase),
+					Data = Source{[Schema = "mart", Item = "dim_sex"]}[Data]
+				in
+					Data
+
+	annotation PBI_ResultType = Table
+

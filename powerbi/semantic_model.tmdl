@@ -1,0 +1,413 @@
+createOrReplace
+
+	expression DwServer = "localhost:5433" meta [IsParameterQuery=true, Type="Text", IsParameterQueryRequired=true]
+
+	expression DwDatabase = "surveillance_dw" meta [IsParameterQuery=true, Type="Text", IsParameterQueryRequired=true]
+
+	/// Cases per month × district × disease × age group × sex.
+	table fact_disease_cases
+
+		measure 'Total Cases' = SUM(fact_disease_cases[total_cases])
+			formatString: #,0
+
+		measure 'Source Records' = SUM(fact_disease_cases[source_records])
+			formatString: #,0
+
+		/// Year from dim_date via TREATAS; disease/age/sex filters never
+		/// reach fact_population, so every district in scope is counted.
+		measure Population =
+				CALCULATE(
+					SUM(fact_population[population]),
+					TREATAS(VALUES(dim_date[year_be]), fact_population[year_be])
+				)
+			formatString: #,0
+
+		/// Blank when sliced by age group or sex: no population by age/sex.
+		measure 'Incidence Rate per 100k' =
+				IF(
+					ISFILTERED(dim_age_group) || ISFILTERED(dim_sex),
+					BLANK(),
+					DIVIDE([Total Cases] * 100000, [Population])
+				)
+			formatString: #,0.00
+
+		measure 'Population Coverage %' =
+				VAR DistrictsInScope =
+					CALCULATE(
+						DISTINCTCOUNT(dim_district[district_key]),
+						dim_district[is_bangkok_district] = TRUE()
+					)
+				VAR DistrictsWithPopulation =
+					CALCULATE(
+						DISTINCTCOUNT(fact_population[district_key]),
+						TREATAS(VALUES(dim_date[year_be]), fact_population[year_be]),
+						dim_district[is_bangkok_district] = TRUE()
+					)
+				RETURN
+					DIVIDE(DistrictsWithPopulation, DistrictsInScope)
+			formatString: 0.0%
+
+		measure 'Population Coverage Status' =
+				IF(
+					[Population Coverage %] >= 1,
+					"ครบถ้วน",
+					"ไม่มี/ไม่ครบ — แสดงเฉพาะจำนวนผู้ป่วย"
+				)
+
+		measure 'Case Share %' =
+				DIVIDE(
+					[Total Cases],
+					CALCULATE([Total Cases], ALL(dim_age_group), ALL(dim_sex))
+				)
+			formatString: 0.0%
+
+		measure 'District Rank' =
+				RANKX(
+					ALLSELECTED(dim_district[district_name]),
+					[Total Cases],
+					,
+					DESC,
+					Dense
+				)
+			formatString: 0
+
+		/// dim_date is monthly, so month shifts use EDATE instead of
+		/// time-intelligence functions that need a daily date table.
+		measure 'Cases Previous Month' =
+				VAR CurrentMonth = MAX(dim_date[month_start])
+				RETURN
+					CALCULATE(
+						[Total Cases],
+						REMOVEFILTERS(dim_date),
+						dim_date[month_start] = EDATE(CurrentMonth, -1)
+					)
+			formatString: #,0
+
+		measure 'Month over Month Cases %' =
+				DIVIDE([Total Cases] - [Cases Previous Month], [Cases Previous Month])
+			formatString: +0.0%;-0.0%;0.0%
+
+		measure 'Cases Same Month Last Year' =
+				VAR CurrentMonth = MAX(dim_date[month_start])
+				RETURN
+					CALCULATE(
+						[Total Cases],
+						REMOVEFILTERS(dim_date),
+						dim_date[month_start] = EDATE(CurrentMonth, -12)
+					)
+			formatString: #,0
+
+		measure 'Year over Year Cases %' =
+				DIVIDE(
+					[Total Cases] - [Cases Same Month Last Year],
+					[Cases Same Month Last Year]
+				)
+			formatString: +0.0%;-0.0%;0.0%
+
+		column date_key
+			dataType: int64
+			isHidden
+			summarizeBy: none
+			sourceColumn: date_key
+
+		column district_key
+			dataType: int64
+			isHidden
+			summarizeBy: none
+			sourceColumn: district_key
+
+		column disease_key
+			dataType: int64
+			isHidden
+			summarizeBy: none
+			sourceColumn: disease_key
+
+		column age_group_key
+			dataType: int64
+			isHidden
+			summarizeBy: none
+			sourceColumn: age_group_key
+
+		column sex
+			dataType: string
+			isHidden
+			summarizeBy: none
+			sourceColumn: sex
+
+		column total_cases
+			dataType: int64
+			formatString: #,0
+			summarizeBy: sum
+			sourceColumn: total_cases
+
+		column source_records
+			dataType: int64
+			formatString: #,0
+			summarizeBy: sum
+			sourceColumn: source_records
+
+		partition fact_disease_cases = m
+			mode: import
+			source =
+					let
+						Source = PostgreSQL.Database(DwServer, DwDatabase),
+						Data = Source{[Schema = "mart", Item = "fact_disease_cases"]}[Data]
+					in
+						Data
+
+	/// Incidence denominator: year × district (2568 borrows 2569, see SOURCES.md).
+	table fact_population
+
+		column year_be
+			dataType: int64
+			isHidden
+			summarizeBy: none
+			sourceColumn: year_be
+
+		column district_key
+			dataType: int64
+			isHidden
+			summarizeBy: none
+			sourceColumn: district_key
+
+		column population
+			dataType: int64
+			formatString: #,0
+			summarizeBy: sum
+			sourceColumn: population
+
+		partition fact_population = m
+			mode: import
+			source =
+					let
+						Source = PostgreSQL.Database(DwServer, DwDatabase),
+						Data = Source{[Schema = "mart", Item = "fact_population"]}[Data]
+					in
+						Data
+
+	/// Monthly calendar from the first to the last onset month.
+	table dim_date
+
+		column date_key
+			dataType: int64
+			isHidden
+			summarizeBy: none
+			sourceColumn: date_key
+
+		column month_start
+			dataType: dateTime
+			formatString: yyyy-mm-dd
+			summarizeBy: none
+			sourceColumn: month_start
+
+			annotation UnderlyingDateTimeDataType = Date
+
+		column year_be
+			dataType: int64
+			formatString: 0
+			summarizeBy: none
+			sourceColumn: year_be
+
+		column year_ce
+			dataType: int64
+			formatString: 0
+			summarizeBy: none
+			sourceColumn: year_ce
+
+		column quarter
+			dataType: int64
+			formatString: 0
+			summarizeBy: none
+			sourceColumn: quarter
+
+		column month
+			dataType: int64
+			formatString: 0
+			summarizeBy: none
+			sourceColumn: month
+
+		column month_label
+			dataType: string
+			summarizeBy: none
+			sourceColumn: month_label
+			sortByColumn: month_start
+
+		partition dim_date = m
+			mode: import
+			source =
+					let
+						Source = PostgreSQL.Database(DwServer, DwDatabase),
+						Data = Source{[Schema = "mart", Item = "dim_date"]}[Data]
+					in
+						Data
+
+	table dim_district
+
+		column district_key
+			dataType: int64
+			isHidden
+			summarizeBy: none
+			sourceColumn: district_key
+
+		column district_name
+			dataType: string
+			summarizeBy: none
+			sourceColumn: district_name
+
+		column is_bangkok_district
+			dataType: boolean
+			isHidden
+			summarizeBy: none
+			sourceColumn: is_bangkok_district
+
+		partition dim_district = m
+			mode: import
+			source =
+					let
+						Source = PostgreSQL.Database(DwServer, DwDatabase),
+						Data = Source{[Schema = "mart", Item = "dim_district"]}[Data]
+					in
+						Data
+
+	table dim_disease
+
+		column disease_key
+			dataType: int64
+			isHidden
+			summarizeBy: none
+			sourceColumn: disease_key
+
+		column disease_name
+			dataType: string
+			summarizeBy: none
+			sourceColumn: disease_name
+
+		partition dim_disease = m
+			mode: import
+			source =
+					let
+						Source = PostgreSQL.Database(DwServer, DwDatabase),
+						Data = Source{[Schema = "mart", Item = "dim_disease"]}[Data]
+					in
+						Data
+
+	table dim_age_group
+
+		column age_group_key
+			dataType: int64
+			isHidden
+			summarizeBy: none
+			sourceColumn: age_group_key
+
+		column age_group
+			dataType: string
+			summarizeBy: none
+			sourceColumn: age_group
+			sortByColumn: age_group_key
+
+		column min_age
+			dataType: int64
+			isHidden
+			summarizeBy: none
+			sourceColumn: min_age
+
+		column max_age
+			dataType: int64
+			isHidden
+			summarizeBy: none
+			sourceColumn: max_age
+
+		partition dim_age_group = m
+			mode: import
+			source =
+					let
+						Source = PostgreSQL.Database(DwServer, DwDatabase),
+						Data = Source{[Schema = "mart", Item = "dim_age_group"]}[Data]
+					in
+						Data
+
+	table dim_sex
+
+		column sex
+			dataType: string
+			isHidden
+			summarizeBy: none
+			sourceColumn: sex
+
+		column sex_label
+			dataType: string
+			summarizeBy: none
+			sourceColumn: sex_label
+
+		partition dim_sex = m
+			mode: import
+			source =
+					let
+						Source = PostgreSQL.Database(DwServer, DwDatabase),
+						Data = Source{[Schema = "mart", Item = "dim_sex"]}[Data]
+					in
+						Data
+
+	/// Spark Data Quality report (standalone, no relationships).
+	table data_quality
+
+		measure 'Failed DQ Rules' = COUNTROWS(FILTER(data_quality, data_quality[status] = "FAIL")) + 0
+			formatString: 0
+
+		column layer
+			dataType: string
+			summarizeBy: none
+			sourceColumn: layer
+
+		column rule
+			dataType: string
+			summarizeBy: none
+			sourceColumn: rule
+
+		column observed
+			dataType: string
+			summarizeBy: none
+			sourceColumn: observed
+
+		column threshold
+			dataType: string
+			summarizeBy: none
+			sourceColumn: threshold
+
+		column status
+			dataType: string
+			summarizeBy: none
+			sourceColumn: status
+
+		partition data_quality = m
+			mode: import
+			source =
+					let
+						Source = PostgreSQL.Database(DwServer, DwDatabase),
+						Data = Source{[Schema = "mart", Item = "data_quality"]}[Data]
+					in
+						Data
+
+	relationship fact_cases_to_date
+		fromColumn: fact_disease_cases.date_key
+		toColumn: dim_date.date_key
+
+	relationship fact_cases_to_district
+		fromColumn: fact_disease_cases.district_key
+		toColumn: dim_district.district_key
+
+	relationship fact_cases_to_disease
+		fromColumn: fact_disease_cases.disease_key
+		toColumn: dim_disease.disease_key
+
+	relationship fact_cases_to_age_group
+		fromColumn: fact_disease_cases.age_group_key
+		toColumn: dim_age_group.age_group_key
+
+	relationship fact_cases_to_sex
+		fromColumn: fact_disease_cases.sex
+		toColumn: dim_sex.sex
+
+	relationship fact_population_to_district
+		fromColumn: fact_population.district_key
+		toColumn: dim_district.district_key

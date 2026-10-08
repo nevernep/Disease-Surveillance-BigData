@@ -1,0 +1,34 @@
+table dim_district
+	lineageTag: 64cb1932-ddd6-4027-bfdc-76f330e7ed1a
+
+	column district_key
+		dataType: int64
+		isHidden
+		lineageTag: e6b4cef3-a2c0-4038-a07d-0df2fd6e8fc9
+		summarizeBy: none
+		sourceColumn: district_key
+
+	column district_name
+		dataType: string
+		lineageTag: b1bf0909-7a44-4b83-99e6-939f70d923c6
+		summarizeBy: none
+		sourceColumn: district_name
+
+	column is_bangkok_district
+		dataType: boolean
+		isHidden
+		lineageTag: 6ee97160-71e3-499e-b647-861484cb2811
+		summarizeBy: none
+		sourceColumn: is_bangkok_district
+
+	partition dim_district = m
+		mode: import
+		source =
+				let
+					Source = PostgreSQL.Database(DwServer, DwDatabase),
+					Data = Source{[Schema = "mart", Item = "dim_district"]}[Data]
+				in
+					Data
+
+	annotation PBI_ResultType = Table
+

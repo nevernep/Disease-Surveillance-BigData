@@ -67,7 +67,7 @@ python -m spark.validate_population_reference --project-root .
 ```
 
 ผลลัพธ์จะถูกสร้างเป็น `data/raw/disease/reference/population_summary_{ปี}.csv`
-(ตอนนี้มีเฉพาะปี 2569 ดูแหล่งที่มาใน `data/raw/disease/reference/SOURCES.md`)
+(ตอนนี้มีครบปี 2568 และ 2569 ดูแหล่งที่มาใน `data/raw/disease/reference/SOURCES.md`)
 ถ้าปีไหนไม่มีไฟล์ task `land_population_{ปี}` จะถูกข้าม และ Spark จะใช้ประชากรปีล่าสุดแทน
 โดย DQ ติดป้าย `population_years_filled_from_latest`
 

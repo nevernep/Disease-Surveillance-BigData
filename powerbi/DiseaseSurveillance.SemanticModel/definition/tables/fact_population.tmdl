@@ -1,4 +1,4 @@
-/// Incidence denominator: year × district (2568 borrows 2569, see SOURCES.md).
+/// Incidence denominator: year × district (2568: 31 Dec 2567, 2569: Jun 2569; see SOURCES.md).
 table fact_population
 	lineageTag: 437825b4-2091-4fcb-b3e0-de1241f6da82
 

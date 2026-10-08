@@ -46,6 +46,22 @@ services:
       retries: 10
     restart: unless-stopped
 
+  # Web dashboard reading the warehouse live: http://localhost:8501
+  dashboard:
+    build: ./dashboard
+    depends_on:
+      warehouse-db:
+        condition: service_healthy
+    environment:
+      WAREHOUSE_DB_HOST: warehouse-db
+      WAREHOUSE_DB_PORT: "5432"
+      WAREHOUSE_DB_NAME: ${WAREHOUSE_DB_NAME:-surveillance_dw}
+      WAREHOUSE_DB_USER: ${WAREHOUSE_DB_USER:-dw_user}
+      WAREHOUSE_DB_PASSWORD: ${WAREHOUSE_DB_PASSWORD:-warehouse-local-only}
+    ports:
+      - "127.0.0.1:8501:8000"
+    restart: unless-stopped
+
   airflow:
     build: ./airflow
     depends_on:

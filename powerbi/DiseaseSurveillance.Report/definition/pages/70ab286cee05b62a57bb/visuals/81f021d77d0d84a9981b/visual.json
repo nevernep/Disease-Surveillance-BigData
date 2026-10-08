@@ -56,5 +56,23 @@
       ]
     },
     "drillFilterOtherVisuals": true
+  },
+  "filterConfig": {
+    "filters": [
+      {
+        "name": "2db58efb949396855643",
+        "field": {
+          "Measure": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "fact_disease_cases"
+              }
+            },
+            "Property": "Total Cases"
+          }
+        },
+        "type": "Advanced"
+      }
+    ]
   }
 }

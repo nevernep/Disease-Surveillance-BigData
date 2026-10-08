@@ -1,0 +1,554 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>เฝ้าระวังโรคติดต่อกรุงเทพฯ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: a surveillance bulletin — masthead with period and sources, one filter row,
+   headline figures, then trend / districts / age-sex / tables in a two-column grid. */
+:root {
+  --bg: #f3f5f4;
+  --surface: #fcfcfb;
+  --ink: #0f1a1c;
+  --ink-2: #4a5759;
+  --muted: #7d8789;
+  --grid: #e1e4e2;
+  --axis: #c2c8c6;
+  --border: rgba(15, 26, 28, 0.10);
+  --accent: #0f6b6f;
+  --accent-ink: #ffffff;
+  --accent-soft: #dcebea;
+  --bar: #2f7f83;
+  --bar-2: #8bbcbd;
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4;
+  --good: #0ca30c; --good-ink: #006300; --critical: #d03b3b; --warning: #b07800;
+  --font-ui: "IBM Plex Sans Thai", "Noto Sans Thai", "Leelawadee UI", system-ui, sans-serif;
+  --font-data: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Menlo, monospace;
+  --step--1: 0.8125rem; --step-0: 0.9375rem; --step-1: 1.125rem; --step-2: 1.5rem; --step-3: 2.25rem;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1312; --surface: #1a1a19; --ink: #f1f4f3; --ink-2: #c1c9c7; --muted: #8e9896;
+    --grid: #2c2f2e; --axis: #3d4240; --border: rgba(255, 255, 255, 0.10);
+    --accent: #5cbcb8; --accent-ink: #0b1514; --accent-soft: #1f3534; --bar: #4fb0ad; --bar-2: #2c6e6c;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181;
+    --good-ink: #0ca30c; --warning: #fab219;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e1312; --surface: #1a1a19; --ink: #f1f4f3; --ink-2: #c1c9c7; --muted: #8e9896;
+  --grid: #2c2f2e; --axis: #3d4240; --border: rgba(255, 255, 255, 0.10);
+  --accent: #5cbcb8; --accent-ink: #0b1514; --accent-soft: #1f3534; --bar: #4fb0ad; --bar-2: #2c6e6c;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181;
+  --good-ink: #0ca30c; --warning: #fab219;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+[hidden] { display: none !important; }
+.state { padding: 48px 0; color: var(--ink-2); }
+.state.error { color: var(--critical); }
+.state code { font-family: var(--font-data); }
+body { background: var(--bg); color: var(--ink); font-family: var(--font-ui); font-size: var(--step-0); line-height: 1.55; }
+.page { max-width: 1240px; margin: 0 auto; padding-inline: clamp(16px, 3vw, 32px); padding-block: 28px 56px; display: grid; gap: 20px; }
+h1, h2, h3 { margin: 0; text-wrap: balance; }
+p { margin: 0; }
+.num { font-family: var(--font-data); font-variant-numeric: tabular-nums; }
+
+/* Masthead */
+.masthead { display: grid; gap: 14px; padding-bottom: 18px; border-bottom: 1px solid var(--axis); }
+.eyebrow { font-size: var(--step--1); letter-spacing: 0.06em; color: var(--accent); font-weight: 600; }
+.masthead h1 { font-size: var(--step-3); font-weight: 700; line-height: 1.2; letter-spacing: -0.01em; }
+.meta { display: flex; flex-wrap: wrap; gap: 6px 22px; color: var(--ink-2); font-size: var(--step--1); }
+.meta b { color: var(--ink); font-weight: 600; }
+
+/* Filters */
+.filters { display: flex; flex-wrap: wrap; gap: 14px 28px; align-items: center; }
+.filter { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.filter-label { font-size: var(--step--1); color: var(--muted); margin-right: 2px; }
+.chip { font: inherit; font-size: var(--step--1); border: 1px solid var(--border); background: var(--surface); color: var(--ink);
+  border-radius: 999px; padding: 5px 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 7px; }
+.chip:hover { border-color: var(--accent); }
+.chip[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.chip:focus-visible, .link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.sw { width: 10px; height: 10px; border-radius: 2px; flex: none; }
+
+/* KPI row */
+.kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.kpi { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px; display: grid; gap: 4px; align-content: start; }
+.kpi-label { font-size: var(--step--1); color: var(--ink-2); }
+.kpi-value { font-size: var(--step-2); font-weight: 600; line-height: 1.25; }
+.kpi-value .unit { font-size: var(--step--1); font-weight: 400; color: var(--ink-2); margin-left: 4px; }
+.kpi-note { font-size: var(--step--1); color: var(--muted); }
+
+/* Panels */
+.grid { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+.panel { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 18px 18px 14px; display: grid; gap: 12px; min-width: 0; }
+.panel-head { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: baseline; justify-content: space-between; }
+.panel h2 { font-size: var(--step-1); font-weight: 600; }
+.panel-sub { font-size: var(--step--1); color: var(--muted); }
+.span-2 { grid-column: 1 / -1; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: var(--step--1); color: var(--ink-2); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.chart { position: relative; width: 100%; }
+.chart svg { display: block; width: 100%; overflow: visible; }
+.chart text { fill: var(--muted); font-family: var(--font-data); font-size: 11px; }
+.chart .label-ui { font-family: var(--font-ui); fill: var(--ink-2); font-size: 12px; }
+.chart .label-strong { fill: var(--ink); }
+.link { font: inherit; font-size: var(--step--1); color: var(--accent); background: none; border: 0; padding: 2px 0; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+
+.tip { position: absolute; pointer-events: none; z-index: 5; background: var(--surface); color: var(--ink); border: 1px solid var(--border);
+  box-shadow: 0 6px 20px rgba(0,0,0,0.12); border-radius: 8px; padding: 9px 11px; font-size: var(--step--1); min-width: 150px; display: grid; gap: 3px; }
+.tip-title { font-weight: 600; margin-bottom: 2px; }
+.tip-row { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; }
+.tip-row .num { text-align: right; }
+
+/* Tables */
+.table-wrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: var(--step--1); }
+th, td { padding: 7px 10px; text-align: left; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+th { color: var(--muted); font-weight: 500; }
+td.r, th.r { text-align: right; }
+tbody tr:last-child td { border-bottom: 0; }
+tr.is-selected td { background: var(--accent-soft); }
+details summary { cursor: pointer; color: var(--accent); font-size: var(--step--1); }
+details[open] summary { margin-bottom: 8px; }
+
+.pill { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 999px; border: 1px solid currentColor; }
+.pill.pass { color: var(--good-ink); }
+.pill.fail { color: var(--critical); }
+.pill.skip { color: var(--warning); }
+.dq-summary { display: flex; flex-wrap: wrap; gap: 10px 24px; align-items: center; }
+.dq-big { font-size: var(--step-2); font-weight: 600; }
+.facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.fact { border-top: 1px solid var(--grid); padding-top: 10px; display: grid; gap: 2px; }
+.fact .num { font-size: var(--step-1); }
+.fact span { font-size: var(--step--1); color: var(--ink-2); }
+
+.notes { font-size: var(--step--1); color: var(--ink-2); display: grid; gap: 6px; max-width: 78ch; }
+.notes h3 { font-size: var(--step-0); color: var(--ink); }
+.notes ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+
+@media (max-width: 960px) {
+  .grid { grid-template-columns: minmax(0, 1fr); }
+  .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 520px) {
+  .kpis { grid-template-columns: minmax(0, 1fr); }
+  .facts { grid-template-columns: minmax(0, 1fr); }
+  .masthead h1 { font-size: var(--step-2); }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .chart path.line { transition: opacity 0.2s; }
+}
+</style>
+</head>
+<body>
+
+<div class="page">
+  <header class="masthead">
+    <div class="eyebrow">รายงานเฝ้าระวังโรคติดต่อ · กรุงเทพมหานคร 50 เขต</div>
+    <h1>ผู้ป่วยโรคติดต่อสำคัญ มิ.ย. 2568 – ก.ย. 2569</h1>
+    <div class="meta">
+      <span>แหล่งข้อมูลผู้ป่วย <b>data.bangkok.go.th</b> (<span class="num" id="raw-count"></span> รายงาน)</span>
+      <span>ประชากร <b>กรมการปกครอง / สำนักงานปกครองและทะเบียน กทม.</b></span>
+      <span>โหลดเข้าคลังข้อมูลล่าสุด <b class="num" id="loaded-at"></b></span>
+    </div>
+  </header>
+
+  <section class="filters" aria-label="ตัวกรอง">
+    <div class="filter" role="group" aria-label="ปี" id="f-year"><span class="filter-label">ปี พ.ศ.</span></div>
+    <div class="filter" role="group" aria-label="โรค" id="f-disease"><span class="filter-label">โรค</span></div>
+  </section>
+
+  <section class="kpis" aria-label="ตัวเลขสรุป">
+    <div class="kpi"><div class="kpi-label">ผู้ป่วยทั้งหมด</div><div class="kpi-value num" id="k-cases"></div><div class="kpi-note" id="k-cases-note"></div></div>
+    <div class="kpi"><div class="kpi-label">อัตราป่วยสะสมต่อแสนประชากร</div><div class="kpi-value num" id="k-rate"></div><div class="kpi-note" id="k-rate-note"></div></div>
+    <div class="kpi"><div class="kpi-label" id="k-peak-label">เดือนที่ผู้ป่วยสูงสุด</div><div class="kpi-value" id="k-peak"></div><div class="kpi-note" id="k-peak-note"></div></div>
+    <div class="kpi"><div class="kpi-label">เขตที่อัตราป่วยสูงสุด</div><div class="kpi-value" id="k-district"></div><div class="kpi-note" id="k-district-note"></div></div>
+  </section>
+
+  <div class="grid">
+    <section class="panel span-2" aria-labelledby="h-trend">
+      <div class="panel-head">
+        <h2 id="h-trend">ผู้ป่วยรายเดือน แยกตามโรค</h2>
+        <span class="panel-sub">ตามวันที่เริ่มป่วย · ราย</span>
+      </div>
+      <div class="legend" id="trend-legend"></div>
+      <div class="chart" id="trend"></div>
+      <details>
+        <summary>ดูตัวเลขรายเดือนเป็นตาราง</summary>
+        <div class="table-wrap" id="trend-table"></div>
+      </details>
+    </section>
+
+    <section class="panel" aria-labelledby="h-district">
+      <div class="panel-head">
+        <h2 id="h-district">อัตราป่วยสะสมรายเขต</h2>
+        <span class="panel-sub">ต่อแสนประชากรตามทะเบียนราษฎร</span>
+      </div>
+      <div class="chart" id="districts"></div>
+      <div><button class="link" id="toggle-districts" type="button"></button></div>
+    </section>
+
+    <div style="display:grid; gap:20px; min-width:0">
+      <section class="panel" aria-labelledby="h-demo">
+        <div class="panel-head">
+          <h2 id="h-demo">ผู้ป่วยตามกลุ่มอายุและเพศ</h2>
+          <span class="panel-sub">ราย · ไม่มีประชากรแยกอายุ/เพศ จึงไม่คิดเป็นอัตรา</span>
+        </div>
+        <div class="chart" id="pyramid"></div>
+      </section>
+
+      <section class="panel" aria-labelledby="h-years">
+        <div class="panel-head">
+          <h2 id="h-years">เปรียบเทียบรายปี</h2>
+          <span class="panel-sub" id="years-sub"></span>
+        </div>
+        <div class="table-wrap" id="year-table"></div>
+      </section>
+    </div>
+
+    <section class="panel span-2" aria-labelledby="h-dq">
+      <div class="panel-head">
+        <h2 id="h-dq">คุณภาพข้อมูล</h2>
+        <span class="panel-sub">ตรวจโดย Spark ทุกครั้งที่ pipeline ทำงาน</span>
+      </div>
+      <div class="dq-summary" id="dq-summary"></div>
+      <div class="facts" id="dq-facts"></div>
+      <details>
+        <summary>ดูผลตรวจทุก rule</summary>
+        <div class="table-wrap" id="dq-table"></div>
+      </details>
+    </section>
+  </div>
+
+  <footer class="notes">
+    <h3>การอ่านตัวเลข</h3>
+    <ul>
+      <li>อัตราป่วยเป็นอัตราสะสมตามช่วงที่มีข้อมูล ปี 2568 มี 7 เดือน (มิ.ย.–ธ.ค.) และปี 2569 มี 9 เดือน (ม.ค.–ก.ย.) จึงไม่ควรเทียบยอดรวมข้ามปีโดยตรง ให้เทียบเดือนที่ตรงกันในกราฟรายเดือน</li>
+      <li>ตัวหารคือประชากรตามทะเบียนราษฎร ปี 2568 ณ 31 ธ.ค. 2567 และปี 2569 ณ มิ.ย. 2569 เขตชั้นในที่มีประชากรแฝงมากอาจมีอัตราสูงกว่าความเป็นจริง</li>
+      <li>เมื่อเลือกทั้งสองปี อัตราใช้ผลรวมประชากรของทั้งสองปีเป็นตัวหาร (ต่อแสนคน-ช่วงเวลา) เช่นเดียวกับรายงาน Power BI</li>
+      <li>ไข้เลือดออกรวม DF, DHF และ DSS · ข้อมูล 10 รายงานที่ไม่ผ่านการตรวจ (เขตนอกกรุงเทพฯ 3, อายุผิดช่วง 7) ไม่ถูกนับ</li>
+    </ul>
+  </footer>
+</div>
+
+<script>
+function start(DATA) {
+// Fixed categorical order: each disease keeps its color under every filter.
+const DISEASES = ["ไข้หวัดใหญ่", "อุจจาระร่วงเฉียบพลัน", "โควิด-19", "ปอดบวม", "ไข้เลือดออก"];
+const YEARS = [2568, 2569];
+const color = d => `var(--s${DISEASES.indexOf(d) + 1})`;
+const nf0 = new Intl.NumberFormat("en-US");
+const nf1 = new Intl.NumberFormat("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const nfk = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 });
+const state = { year: "all", disease: "all", allDistricts: false };
+
+const months = [...new Map(DATA.monthly.map(r => [r.m, { m: r.m, label: r.label, y: r.y }])).values()]
+  .sort((a, b) => a.m.localeCompare(b.m));
+const pop = {};
+for (const r of DATA.population) (pop[r.y] ||= {})[r.dist] = r.p;
+const period = Object.fromEntries(DATA.period.map(p => [p.y, p]));
+
+const years = () => state.year === "all" ? YEARS : [Number(state.year)];
+const diseases = () => state.disease === "all" ? DISEASES : [state.disease];
+const keep = r => years().includes(r.y) && (state.disease === "all" || r.d === state.disease);
+const sum = (rows, f = r => r.c) => rows.reduce((t, r) => t + f(r), 0);
+const totalPop = () => sum(years(), y => Object.values(pop[y] || {}).reduce((a, b) => a + b, 0));
+const monthsCovered = () => sum(years(), y => period[y]?.months || 0);
+const shortMonth = label => label.split(" ")[0];
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+function niceMax(v) {
+  if (v <= 0) return 1;
+  const p = Math.pow(10, Math.floor(Math.log10(v)));
+  const n = v / p;
+  return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10) * p;
+}
+
+/* ---------- Filters ---------- */
+function chip(group, value, text, swatch) {
+  const b = document.createElement("button");
+  b.type = "button"; b.className = "chip"; b.dataset.value = value;
+  b.innerHTML = (swatch ? `<span class="sw" style="background:${swatch}"></span>` : "") + esc(text);
+  b.addEventListener("click", () => { state[group] = value; render(); });
+  return b;
+}
+const fy = document.getElementById("f-year"), fd = document.getElementById("f-disease");
+fy.append(chip("year", "all", "ทั้งหมด"), ...YEARS.map(y => chip("year", String(y), String(y))));
+fd.append(chip("disease", "all", "ทุกโรค"), ...DISEASES.map(d => chip("disease", d, d, color(d))));
+
+/* ---------- Tooltip ---------- */
+function tooltip(host) {
+  const t = document.createElement("div"); t.className = "tip"; t.hidden = true; host.append(t);
+  return {
+    show(html, x, y) {
+      t.innerHTML = html; t.hidden = false;
+      const w = t.offsetWidth, hw = host.clientWidth;
+      t.style.left = Math.max(0, Math.min(x + 14, hw - w)) + "px";
+      t.style.top = Math.max(0, y - t.offsetHeight - 10) + "px";
+    },
+    hide() { t.hidden = true; }
+  };
+}
+const row = (sw, name, val) => `<div class="tip-row"><span class="sw" style="background:${sw}"></span><span>${esc(name)}</span><span class="num">${val}</span></div>`;
+
+/* ---------- KPIs ---------- */
+function renderKpis() {
+  const rows = DATA.district.filter(keep);
+  const cases = sum(rows);
+  const P = totalPop();
+  document.getElementById("k-cases").innerHTML = `${nf0.format(cases)}<span class="unit">ราย</span>`;
+  document.getElementById("k-cases-note").textContent = state.disease === "all" ? `${DISEASES.length} โรค` : state.disease;
+  document.getElementById("k-rate").textContent = nf1.format(cases * 1e5 / P);
+  document.getElementById("k-rate-note").textContent = `ช่วงข้อมูล ${monthsCovered()} เดือน · ประชากร ${nf0.format(P)}`;
+
+  const byMonth = months.filter(m => years().includes(m.y)).map(m => ({
+    ...m, c: sum(DATA.monthly.filter(r => r.m === m.m && (state.disease === "all" || r.d === state.disease)))
+  }));
+  const peak = byMonth.reduce((a, b) => b.c > a.c ? b : a, byMonth[0]);
+  document.getElementById("k-peak").textContent = peak.label;
+  document.getElementById("k-peak-note").textContent = `${nf0.format(peak.c)} ราย`;
+
+  const top = districtRates()[0];
+  document.getElementById("k-district").textContent = top.dist;
+  document.getElementById("k-district-note").textContent = `${nf1.format(top.rate)} ต่อแสน · ${nf0.format(top.c)} ราย`;
+}
+
+/* ---------- Monthly trend (one y-axis, one line per disease) ---------- */
+const trendHost = document.getElementById("trend");
+const trendTip = tooltip(trendHost);
+function renderTrend() {
+  const ms = months.filter(m => years().includes(m.y));
+  const ds = diseases();
+  const val = (m, d) => (DATA.monthly.find(r => r.m === m && r.d === d) || { c: 0 }).c;
+  const series = ds.map(d => ({ d, v: ms.map(m => val(m.m, d)) }));
+  const W = Math.max(320, trendHost.clientWidth), H = W < 560 ? 240 : 300;
+  const showEnd = ds.length <= 4 && W >= 560;
+  const m = { t: 14, r: showEnd ? 150 : 16, b: 34, l: 52 };
+  const iw = W - m.l - m.r, ih = H - m.t - m.b;
+  const ymax = niceMax(Math.max(1, ...series.flatMap(s => s.v)));
+  const x = i => m.l + (ms.length === 1 ? iw / 2 : i * iw / (ms.length - 1));
+  const y = v => m.t + ih - v / ymax * ih;
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map(f => f * ymax);
+  const every = iw / ms.length < 34 ? 2 : 1;
+
+  let s = `<svg viewBox="0 0 ${W} ${H}" height="${H}" role="img" aria-label="กราฟเส้นจำนวนผู้ป่วยรายเดือน">`;
+  for (const t of ticks) s += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(t)}" y2="${y(t)}" stroke="var(--grid)"/><text x="${m.l - 8}" y="${y(t) + 4}" text-anchor="end">${nfk.format(t)}</text>`;
+  s += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(0)}" y2="${y(0)}" stroke="var(--axis)"/>`;
+  const jan = ms.findIndex(mm => mm.m.endsWith("-01"));
+  if (jan > 0) {
+    const xb = (x(jan - 1) + x(jan)) / 2;
+    s += `<line x1="${xb}" x2="${xb}" y1="${m.t}" y2="${y(0)}" stroke="var(--axis)" stroke-dasharray="3 4"/>`;
+    s += `<text class="label-ui" x="${xb - 6}" y="${m.t + 12}" text-anchor="end">พ.ศ. ${ms[jan - 1].y}</text><text class="label-ui" x="${xb + 6}" y="${m.t + 12}">พ.ศ. ${ms[jan].y}</text>`;
+  }
+  ms.forEach((mm, i) => { if (i % every === 0) s += `<text x="${x(i)}" y="${H - m.b + 18}" text-anchor="middle" class="label-ui">${shortMonth(mm.label)}</text>`; });
+  for (const se of series) {
+    const d = se.v.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join("");
+    s += `<path class="line" d="${d}" fill="none" stroke="${color(se.d)}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+    const last = se.v.length - 1;
+    s += `<circle cx="${x(last)}" cy="${y(se.v[last])}" r="4" fill="${color(se.d)}" stroke="var(--surface)" stroke-width="2"/>`;
+  }
+  if (showEnd) {
+    const ends = series.map(se => ({ d: se.d, y: y(se.v[se.v.length - 1]) })).sort((a, b) => a.y - b.y);
+    for (let i = 1; i < ends.length; i++) ends[i].y = Math.max(ends[i].y, ends[i - 1].y + 15);
+    for (const e of ends) s += `<text class="label-ui label-strong" x="${W - m.r + 10}" y="${e.y + 4}">${esc(e.d)}</text>`;
+  }
+  s += `<g id="trend-hover" visibility="hidden"><line id="th-line" y1="${m.t}" y2="${y(0)}" stroke="var(--axis)"/>${series.map((se, k) => `<circle id="th-dot-${k}" r="4.5" fill="${color(se.d)}" stroke="var(--surface)" stroke-width="2"/>`).join("")}</g>`;
+  s += `<rect x="${m.l}" y="${m.t}" width="${iw}" height="${ih}" fill="transparent" id="trend-hit"/>`;
+  s += `</svg>`;
+  trendHost.querySelector("svg")?.remove();
+  trendHost.insertAdjacentHTML("afterbegin", s);
+
+  const hit = document.getElementById("trend-hit"), g = document.getElementById("trend-hover");
+  const move = ev => {
+    const rect = trendHost.getBoundingClientRect();
+    const px = (ev.clientX - rect.left) * (W / rect.width);
+    const i = Math.max(0, Math.min(ms.length - 1, Math.round((px - m.l) / (iw / Math.max(1, ms.length - 1)))));
+    g.setAttribute("visibility", "visible");
+    const line = document.getElementById("th-line"); line.setAttribute("x1", x(i)); line.setAttribute("x2", x(i));
+    series.forEach((se, k) => { const c = document.getElementById(`th-dot-${k}`); c.setAttribute("cx", x(i)); c.setAttribute("cy", y(se.v[i])); });
+    const rows = series.map(se => ({ d: se.d, v: se.v[i] })).sort((a, b) => b.v - a.v);
+    const total = sum(rows, r => r.v);
+    trendTip.show(`<div class="tip-title">${esc(ms[i].label)}</div>` + rows.map(r => row(color(r.d), r.d, nf0.format(r.v))).join("") +
+      (rows.length > 1 ? `<div class="tip-row" style="border-top:1px solid var(--grid);padding-top:3px"><span></span><span>รวม</span><span class="num">${nf0.format(total)}</span></div>` : ""),
+      x(i) * rect.width / W, (m.t + 10) * rect.height / H + 60);
+  };
+  hit.addEventListener("pointermove", move);
+  hit.addEventListener("pointerleave", () => { g.setAttribute("visibility", "hidden"); trendTip.hide(); });
+
+  document.getElementById("trend-legend").innerHTML = ds.length > 1
+    ? ds.map(d => `<span><span class="sw" style="background:${color(d)}"></span>${esc(d)}</span>`).join("") : "";
+  document.getElementById("trend-table").innerHTML = `<table><thead><tr><th>เดือน</th>${ds.map(d => `<th class="r">${esc(d)}</th>`).join("")}</tr></thead><tbody>` +
+    ms.map((mm, i) => `<tr><td>${esc(mm.label)}</td>${series.map(se => `<td class="r num">${nf0.format(se.v[i])}</td>`).join("")}</tr>`).join("") + `</tbody></table>`;
+}
+
+/* ---------- Districts: ranked incidence ---------- */
+function districtRates() {
+  const rows = DATA.district.filter(keep);
+  const names = Object.keys(pop[YEARS[0]] || {});
+  return names.map(dist => {
+    const c = sum(rows.filter(r => r.dist === dist));
+    const p = sum(years(), yy => pop[yy]?.[dist] || 0);
+    return { dist, c, p, rate: p ? c * 1e5 / p : 0 };
+  }).sort((a, b) => b.rate - a.rate);
+}
+const distHost = document.getElementById("districts");
+const distTip = tooltip(distHost);
+function renderDistricts() {
+  const all = districtRates();
+  const list = state.allDistricts ? all : all.slice(0, 15);
+  const W = Math.max(300, distHost.clientWidth);
+  const rowH = 22, labelW = 104, valueW = 58;
+  const H = list.length * rowH + 8;
+  const iw = W - labelW - valueW;
+  const max = all[0]?.rate || 1;
+  let s = `<svg viewBox="0 0 ${W} ${H}" height="${H}" role="img" aria-label="อัตราป่วยรายเขตเรียงจากมากไปน้อย">`;
+  s += `<line x1="${labelW}" x2="${labelW}" y1="0" y2="${H - 4}" stroke="var(--axis)"/>`;
+  list.forEach((d, i) => {
+    const y0 = 4 + i * rowH, bh = 14, w = Math.max(2, d.rate / max * iw), r = Math.min(4, w / 2);
+    const x0 = labelW, x1 = labelW + w, yb = y0 + bh;
+    s += `<text class="label-ui" x="${labelW - 8}" y="${y0 + 11}" text-anchor="end">${esc(d.dist)}</text>`;
+    s += `<path d="M${x0},${y0}H${x1 - r}Q${x1},${y0} ${x1},${y0 + r}V${yb - r}Q${x1},${yb} ${x1 - r},${yb}H${x0}Z" fill="${i < 3 ? "var(--bar)" : "var(--bar-2)"}"/>`;
+    s += `<text x="${x1 + 6}" y="${y0 + 11}">${nf0.format(Math.round(d.rate))}</text>`;
+    s += `<rect x="0" y="${y0 - 3}" width="${W}" height="${rowH}" fill="transparent" data-i="${i}" class="dist-hit"/>`;
+  });
+  s += `</svg>`;
+  distHost.querySelector("svg")?.remove();
+  distHost.insertAdjacentHTML("afterbegin", s);
+  distHost.querySelectorAll(".dist-hit").forEach(el => {
+    el.addEventListener("pointermove", ev => {
+      const d = list[Number(el.dataset.i)], rect = distHost.getBoundingClientRect();
+      distTip.show(`<div class="tip-title">เขต${esc(d.dist)} · อันดับ ${all.indexOf(d) + 1}</div>` +
+        `<div class="tip-row"><span></span><span>อัตราต่อแสน</span><span class="num">${nf1.format(d.rate)}</span></div>` +
+        `<div class="tip-row"><span></span><span>ผู้ป่วย</span><span class="num">${nf0.format(d.c)}</span></div>` +
+        `<div class="tip-row"><span></span><span>ประชากร</span><span class="num">${nf0.format(d.p)}</span></div>`,
+        ev.clientX - rect.left, ev.clientY - rect.top);
+    });
+    el.addEventListener("pointerleave", () => distTip.hide());
+  });
+  document.getElementById("toggle-districts").textContent = state.allDistricts ? "แสดงเฉพาะ 15 อันดับแรก" : `แสดงทั้ง ${all.length} เขต`;
+}
+document.getElementById("toggle-districts").addEventListener("click", () => { state.allDistricts = !state.allDistricts; renderDistricts(); });
+
+/* ---------- Age × sex (mirrored bars; sides carry the sex, labels name them) ---------- */
+const pyrHost = document.getElementById("pyramid");
+const pyrTip = tooltip(pyrHost);
+function renderPyramid() {
+  const rows = DATA.demo.filter(keep);
+  const groups = [...new Map(DATA.demo.map(r => [r.ak, r.a])).entries()].sort((a, b) => a[0] - b[0]);
+  const total = sum(rows);
+  const data = groups.map(([ak, a]) => ({
+    a, m: sum(rows.filter(r => r.ak === ak && r.s === "ชาย")), f: sum(rows.filter(r => r.ak === ak && r.s === "หญิง")),
+    u: sum(rows.filter(r => r.ak === ak && r.s === "ไม่ระบุ"))
+  }));
+  const W = Math.max(300, pyrHost.clientWidth), rowH = 22, top = 24, mid = 56;
+  const H = top + data.length * rowH + 6;
+  const half = (W - mid) / 2 - 44, cx = W / 2;
+  const max = Math.max(1, ...data.flatMap(d => [d.m, d.f]));
+  let s = `<svg viewBox="0 0 ${W} ${H}" height="${H}" role="img" aria-label="จำนวนผู้ป่วยตามกลุ่มอายุ ชายด้านซ้าย หญิงด้านขวา">`;
+  s += `<text class="label-ui label-strong" x="${cx - mid / 2}" y="14" text-anchor="end">← ชาย</text><text class="label-ui label-strong" x="${cx + mid / 2}" y="14">หญิง →</text>`;
+  data.forEach((d, i) => {
+    const y0 = top + i * rowH, bh = 14, yb = y0 + bh;
+    const wm = Math.max(1, d.m / max * half), wf = Math.max(1, d.f / max * half);
+    const xl = cx - mid / 2, xr = cx + mid / 2, rm = Math.min(4, wm / 2), rf = Math.min(4, wf / 2);
+    s += `<text class="label-ui" x="${cx}" y="${y0 + 11}" text-anchor="middle">${esc(d.a)}</text>`;
+    s += `<path d="M${xl},${y0}H${xl - wm + rm}Q${xl - wm},${y0} ${xl - wm},${y0 + rm}V${yb - rm}Q${xl - wm},${yb} ${xl - wm + rm},${yb}H${xl}Z" fill="var(--bar)"/>`;
+    s += `<path d="M${xr},${y0}H${xr + wf - rf}Q${xr + wf},${y0} ${xr + wf},${y0 + rf}V${yb - rf}Q${xr + wf},${yb} ${xr + wf - rf},${yb}H${xr}Z" fill="var(--bar-2)"/>`;
+    s += `<text x="${xl - wm - 6}" y="${y0 + 11}" text-anchor="end">${nfk.format(d.m)}</text><text x="${xr + wf + 6}" y="${y0 + 11}">${nfk.format(d.f)}</text>`;
+    s += `<rect x="0" y="${y0 - 3}" width="${W}" height="${rowH}" fill="transparent" data-i="${i}" class="pyr-hit"/>`;
+  });
+  s += `</svg>`;
+  pyrHost.querySelector("svg")?.remove();
+  pyrHost.insertAdjacentHTML("afterbegin", s);
+  pyrHost.querySelectorAll(".pyr-hit").forEach(el => {
+    el.addEventListener("pointermove", ev => {
+      const d = data[Number(el.dataset.i)], rect = pyrHost.getBoundingClientRect(), n = d.m + d.f + d.u;
+      pyrTip.show(`<div class="tip-title">อายุ ${esc(d.a)} ปี · ${nf1.format(n / total * 100)}% ของผู้ป่วย</div>` +
+        `<div class="tip-row"><span class="sw" style="background:var(--bar)"></span><span>ชาย</span><span class="num">${nf0.format(d.m)}</span></div>` +
+        `<div class="tip-row"><span class="sw" style="background:var(--bar-2)"></span><span>หญิง</span><span class="num">${nf0.format(d.f)}</span></div>` +
+        (d.u ? `<div class="tip-row"><span></span><span>ไม่ระบุเพศ</span><span class="num">${nf0.format(d.u)}</span></div>` : ""),
+        ev.clientX - rect.left, ev.clientY - rect.top);
+    });
+    el.addEventListener("pointerleave", () => pyrTip.hide());
+  });
+}
+
+/* ---------- Year comparison table ---------- */
+function renderYearTable() {
+  const P = Object.fromEntries(YEARS.map(y => [y, Object.values(pop[y] || {}).reduce((a, b) => a + b, 0)]));
+  const cell = (d, y) => {
+    const c = sum(DATA.district.filter(r => r.y === y && r.d === d));
+    return `<td class="r num">${nf0.format(c)}</td><td class="r num">${nf1.format(c * 1e5 / P[y])}</td>`;
+  };
+  document.getElementById("years-sub").textContent = YEARS.map(y => `${y}: ${period[y].label} (${period[y].months} เดือน)`).join(" · ");
+  document.getElementById("year-table").innerHTML =
+    `<table><thead><tr><th rowspan="2">โรค</th>${YEARS.map(y => `<th class="r" colspan="2">${y}</th>`).join("")}</tr>` +
+    `<tr>${YEARS.map(() => `<th class="r">ราย</th><th class="r">ต่อแสน</th>`).join("")}</tr></thead><tbody>` +
+    DISEASES.map(d => `<tr class="${state.disease === d ? "is-selected" : ""}"><td><span style="display:inline-flex;gap:7px;align-items:center"><span class="sw" style="background:${color(d)}"></span>${esc(d)}</span></td>${YEARS.map(y => cell(d, y)).join("")}</tr>`).join("") +
+    `</tbody></table>`;
+}
+
+/* ---------- Data quality ---------- */
+function renderDq() {
+  const dq = DATA.dq;
+  const n = s => dq.filter(r => r.status === s).length;
+  const get = rule => (dq.find(r => r.rule === rule) || {}).observed;
+  document.getElementById("dq-summary").innerHTML =
+    `<span class="dq-big num">${dq.length}</span><span>rule</span>` +
+    `<span class="pill pass">✓ ผ่าน ${n("PASS")}</span>` +
+    `<span class="pill fail">✕ ไม่ผ่าน ${n("FAIL")}</span>` +
+    (n("SKIP") ? `<span class="pill skip">– ข้าม ${n("SKIP")}</span>` : "");
+  const facts = [
+    [get("raw_rows_not_empty"), "รายงานดิบที่อ่านเข้ามา"],
+    [get("quarantined_rows"), "แยกไป quarantine (เขตนอก กทม. / อายุผิดช่วง)"],
+    [get("identical_source_rows_kept"), "แถวที่ค่าเหมือนกันทุกช่อง เก็บไว้ (ไม่มีรหัสผู้ป่วย)"],
+  ];
+  document.getElementById("dq-facts").innerHTML = facts.map(([v, t]) =>
+    `<div class="fact"><span class="num">${v ? nf0.format(Number(v)) : "–"}</span><span>${esc(t)}</span></div>`).join("");
+  document.getElementById("dq-table").innerHTML = `<table><thead><tr><th>ชั้นข้อมูล</th><th>rule</th><th class="r">ค่าที่พบ</th><th>เกณฑ์</th><th>ผล</th></tr></thead><tbody>` +
+    dq.map(r => `<tr><td>${esc(r.layer)}</td><td>${esc(r.rule)}</td><td class="r num">${esc(r.observed)}</td><td>${esc(r.threshold)}</td>` +
+      `<td><span class="pill ${r.status.toLowerCase()}">${r.status === "PASS" ? "✓" : r.status === "FAIL" ? "✕" : "–"} ${esc(r.status)}</span></td></tr>`).join("") +
+    `</tbody></table>`;
+}
+
+/* ---------- Render ---------- */
+function render() {
+  for (const b of fy.querySelectorAll(".chip")) b.setAttribute("aria-pressed", String(b.dataset.value === state.year));
+  for (const b of fd.querySelectorAll(".chip")) b.setAttribute("aria-pressed", String(b.dataset.value === state.disease));
+  renderKpis(); renderTrend(); renderDistricts(); renderPyramid(); renderYearTable();
+}
+document.getElementById("loaded-at").textContent = DATA.loaded_at;
+renderDq();
+render();
+let rt;
+new ResizeObserver(() => { clearTimeout(rt); rt = setTimeout(() => { renderTrend(); renderDistricts(); renderPyramid(); }, 120); }).observe(document.querySelector(".page"));
+const raw = (DATA.dq.find(r => r.rule === "raw_rows_not_empty") || {}).observed;
+document.getElementById("raw-count").textContent = raw ? nf0.format(Number(raw)) : "–";
+}
+
+// Live data from the warehouse on every page load.
+const content = [...document.querySelectorAll(".page > :not(header)")];
+const loadState = document.createElement("p");
+loadState.className = "state"; loadState.textContent = "กำลังโหลดข้อมูลจากคลังข้อมูล…";
+content.forEach(el => { el.hidden = true; });
+document.querySelector(".masthead").after(loadState);
+fetch("api/data", { cache: "no-store" })
+  .then(async r => { const body = await r.json(); if (!r.ok) throw new Error(body.error || r.statusText); return body; })
+  .then(data => { loadState.remove(); content.forEach(el => { el.hidden = false; }); start(data); })
+  .catch(err => {
+    loadState.className = "state error";
+    loadState.innerHTML = "โหลดข้อมูลไม่สำเร็จ: <code></code><br>ตรวจว่า service <code>warehouse-db</code> ทำงานอยู่ และรัน pipeline แล้ว";
+    loadState.querySelector("code").textContent = err.message;
+  });
+</script>
+
+</body>
+</html>

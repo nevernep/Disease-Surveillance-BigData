@@ -75,3 +75,34 @@ def test_prepare_year_reads_thai_windows_encoding(tmp_path):
     frame = prepare_year(str(_official_style_csv(tmp_path, "cp874")), 2568)
 
     assert len(frame) == 50
+
+
+def test_prepare_year_reads_dopa_yearly_zip(tmp_path):
+    """DOPA stat_XX.zip: nationwide HTML table saved as .xls, one
+    "ท้องถิ่นเขต…" registration office per Bangkok district, a "-" total row."""
+    import zipfile
+
+    from spark.prepare_population_reference import prepare_year
+    from spark.schemas import BANGKOK_DISTRICTS
+
+    header = ["ปีเดือน", "รหัสจังหวัด", "ชื่อจังหวัด", "รหัสสำนักทะเบียน",
+              "ชื่อสำนักทะเบียน", "จำนวนประชากรชาย", "จำนวนประชากรหญิง",
+              "จำนวนประชากรทั้งหมด"]
+    rows = [["6712", "10", "กรุงเทพมหานคร", "0", "-", "9", "9", "50,000"]]
+    rows += [["6712", "10", "กรุงเทพมหานคร", "1001", f"ท้องถิ่นเขต{name}", "400", "600", "1,000"]
+             for name in BANGKOK_DISTRICTS]
+    rows += [["6712", "11", "สมุทรปราการ", "1101", "อำเภอเมืองสมุทรปราการ", "1", "1", "2"]]
+
+    def tr(cells):
+        return "<tr>" + "".join(f"<td>{cell}</td>" for cell in cells) + "</tr>"
+
+    html = "<table border='1'>" + tr(header) + "".join(tr(row) for row in rows) + "</table>"
+    archive = tmp_path / "stat_67.zip"
+    with zipfile.ZipFile(archive, "w") as zipped:
+        zipped.writestr("stat_67/stat_c67.xls", "<table></table>")
+        zipped.writestr("stat_67/stat_a67.xls", "\ufeff" + html)
+
+    frame = prepare_year(str(archive), 2568)
+
+    assert set(frame["เขต"]) == set(BANGKOK_DISTRICTS)
+    assert frame["ประชากรรวม"].sum() == 1000 * len(BANGKOK_DISTRICTS)

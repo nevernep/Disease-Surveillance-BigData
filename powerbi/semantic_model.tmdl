@@ -155,7 +155,7 @@ createOrReplace
 					in
 						Data
 
-	/// Incidence denominator: year × district (2568 borrows 2569, see SOURCES.md).
+	/// Incidence denominator: year × district (2568: 31 Dec 2567, 2569: Jun 2569; see SOURCES.md).
 	table fact_population
 
 		column year_be

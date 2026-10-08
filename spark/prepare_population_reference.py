@@ -10,6 +10,8 @@ from __future__ import annotations
 import argparse
 import io
 import re
+import zipfile
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Iterable
 
@@ -22,11 +24,19 @@ EXPECTED_COLUMNS = ["ปี", "เขต", "ประชากรรวม"]
 YEAR_COLUMN_ALIASES = {"ปี", "ปีข้อมูล", "ปีพ.ศ.", "พ.ศ.", "year", "year_be"}
 DISTRICT_COLUMN_ALIASES = {
     "เขต", "ชื่อเขต", "อำเภอ/เขต", "district", "district_name",
+    # DOPA stat_a files: one registration office per Bangkok district,
+    # named "ท้องถิ่นเขต<district>".
+    "ชื่อสำนักทะเบียน",
 }
 POPULATION_COLUMN_ALIASES = {
     "ประชากรรวม", "ประชากรทั้งหมด", "จำนวนประชากร", "ประชากร",
-    "total_population", "population", "total",
+    "total_population", "population", "total", "จำนวนประชากรทั้งหมด",
 }
+# Nationwide files (DOPA) are narrowed to Bangkok when this column exists.
+PROVINCE_COLUMN_ALIASES = {"ชื่อจังหวัด", "จังหวัด", "province"}
+BANGKOK_PROVINCE = "กรุงเทพ"
+# DOPA yearly zip: stat_c (province), stat_a (district), stat_t, stat_m.
+DOPA_DISTRICT_MEMBER = re.compile(r"(^|/)stat_a\d+\.xls$")
 CSV_ENCODINGS = ("utf-8-sig", "cp874")
 # A Thai above/below vowel or tone mark typed twice in a row.
 THAI_DOUBLED_MARK = r"([ัิ-ฺ็-๎])\1+"
@@ -58,6 +68,7 @@ def _read_csv_bytes(content: bytes) -> pd.DataFrame:
 
 def _normalize_district(value: object) -> str:
     district = _clean_name(value)
+    district = re.sub(r"^ท้องถิ่น", "", district)
     district = re.sub(r"^(เขต|ข\.?)\s*", "", district)
     district = re.sub(r"\s*(กรุงเทพมหานคร|กรุงเทพฯ|กทม\.?)$", "", district)
     # Common Thai typing errors seen in official files: "เเ" typed for "แ",
@@ -73,21 +84,68 @@ def _normalize_district(value: object) -> str:
     return aliases.get(district, district)
 
 
+class _HtmlTable(HTMLParser):
+    """Rows of the first HTML table (DOPA ".xls" files are HTML tables)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.rows: list[list[str]] = []
+        self._row: list[str] | None = None
+        self._cell: str | None = None
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "tr":
+            self._row = []
+        elif tag in {"td", "th"} and self._row is not None:
+            self._cell = ""
+
+    def handle_endtag(self, tag):
+        if tag in {"td", "th"} and self._cell is not None and self._row is not None:
+            self._row.append(self._cell.strip())
+            self._cell = None
+        elif tag == "tr" and self._row is not None:
+            self.rows.append(self._row)
+            self._row = None
+
+    def handle_data(self, data):
+        if self._cell is not None:
+            self._cell += data
+
+
+def _read_html_table(content: bytes) -> pd.DataFrame:
+    parser = _HtmlTable()
+    parser.feed(content.decode("utf-8-sig", errors="strict"))
+    if not parser.rows:
+        raise ValueError("HTML source contains no table rows")
+    header, *rows = parser.rows
+    return pd.DataFrame([row for row in rows if len(row) == len(header)], columns=header)
+
+
+def _read_bytes(content: bytes, name: str) -> pd.DataFrame:
+    """Dispatch on content: DOPA zip, HTML table, Excel workbook or CSV."""
+    if content[:4] == b"PK\x03\x04" and name.lower().endswith(".zip"):
+        with zipfile.ZipFile(io.BytesIO(content)) as archive:
+            members = [m for m in archive.namelist() if DOPA_DISTRICT_MEMBER.search(m)]
+            if len(members) != 1:
+                raise ValueError(
+                    f"{name}: expected one district file (stat_a*.xls), got {members}"
+                )
+            return _read_bytes(archive.read(members[0]), members[0])
+    if content.lstrip(b"\xef\xbb\xbf \r\n\t")[:1] == b"<":
+        return _read_html_table(content)
+    if content[:4] == b"PK\x03\x04" or content[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":
+        return pd.read_excel(io.BytesIO(content))
+    return _read_csv_bytes(content)
+
+
 def _read_source(source: str) -> pd.DataFrame:
     path = Path(source)
     if path.is_file():
-        if path.suffix.lower() in {".xlsx", ".xls"}:
-            return pd.read_excel(path)
-        return _read_csv_bytes(path.read_bytes())
+        return _read_bytes(path.read_bytes(), path.name)
 
     response = requests.get(source, timeout=60)
     response.raise_for_status()
-    content_type = response.headers.get("content-type", "").lower()
-    if "excel" in content_type or source.lower().split("?")[0].endswith(
-        (".xlsx", ".xls")
-    ):
-        return pd.read_excel(io.BytesIO(response.content))
-    return _read_csv_bytes(response.content)
+    return _read_bytes(response.content, source.split("?")[0])
 
 
 def prepare_year(source: str, year: int) -> pd.DataFrame:
@@ -100,6 +158,11 @@ def prepare_year(source: str, year: int) -> pd.DataFrame:
     subdistrict_column = _find_column(
         frame.columns, SUBDISTRICT_COLUMN_ALIASES
     )
+    province_column = _find_column(frame.columns, PROVINCE_COLUMN_ALIASES)
+    if province_column is not None:
+        frame = frame[
+            frame[province_column].astype(str).str.contains(BANGKOK_PROVINCE, regex=False)
+        ]
 
     if district_column is None or population_column is None:
         missing = []
@@ -133,7 +196,8 @@ def prepare_year(source: str, year: int) -> pd.DataFrame:
     )
     selected = selected[["ปี", "เขต", "ประชากรรวม"]]
     selected = selected.dropna(subset=["ปี", "เขต", "ประชากรรวม"])
-    selected = selected[selected["เขต"] != ""]
+    # "-" is the province-total row in DOPA files.
+    selected = selected[~selected["เขต"].isin({"", "-"})]
     # Total rows: "รวม", "ยอดรวม", and the source typo "ยอรวม". No Bangkok
     # district name contains "รวม".
     selected = selected[

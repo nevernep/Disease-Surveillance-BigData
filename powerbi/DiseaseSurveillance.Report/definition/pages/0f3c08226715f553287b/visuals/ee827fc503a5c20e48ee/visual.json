@@ -13,6 +13,25 @@
     "visualType": "pivotTable",
     "query": {
       "queryState": {
+        "Columns": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "dim_sex"
+                    }
+                  },
+                  "Property": "sex_label"
+                }
+              },
+              "queryRef": "dim_sex.sex_label",
+              "nativeQueryRef": "sex_label",
+              "active": true
+            }
+          ]
+        },
         "Rows": {
           "projections": [
             {
@@ -29,24 +48,6 @@
               "queryRef": "dim_age_group.age_group",
               "nativeQueryRef": "age_group",
               "active": true
-            }
-          ]
-        },
-        "Columns": {
-          "projections": [
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "dim_sex"
-                    }
-                  },
-                  "Property": "sex_label"
-                }
-              },
-              "queryRef": "dim_sex.sex_label",
-              "nativeQueryRef": "sex_label"
             }
           ]
         },

@@ -32,24 +32,6 @@
             }
           ]
         },
-        "Y": {
-          "projections": [
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "fact_disease_cases"
-                    }
-                  },
-                  "Property": "Total Cases"
-                }
-              },
-              "queryRef": "fact_disease_cases.Total Cases",
-              "nativeQueryRef": "Total Cases"
-            }
-          ]
-        },
         "Series": {
           "projections": [
             {
@@ -65,6 +47,24 @@
               },
               "queryRef": "dim_sex.sex_label",
               "nativeQueryRef": "sex_label"
+            }
+          ]
+        },
+        "Y": {
+          "projections": [
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "fact_disease_cases"
+                    }
+                  },
+                  "Property": "Total Cases"
+                }
+              },
+              "queryRef": "fact_disease_cases.Total Cases",
+              "nativeQueryRef": "Total Cases"
             }
           ]
         }
@@ -84,8 +84,7 @@
             },
             "direction": "Ascending"
           }
-        ],
-        "isDefaultSort": false
+        ]
       }
     },
     "visualContainerObjects": {

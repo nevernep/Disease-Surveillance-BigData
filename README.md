@@ -68,6 +68,7 @@ Data.go.th API → Raw JSON → Data Lake (S3) → Airflow → Spark (Clean/DQ) 
 | `object-store` | SeaweedFS: S3 API และ filer | `8333`, `8888` |
 | `postgres` | metadata ของ Airflow เท่านั้น | — |
 | `warehouse-db` | Data Warehouse (schema `mart`) | `127.0.0.1:5433` |
+| `dashboard` | เว็บ dashboard อ่าน warehouse สดทุกครั้งที่เปิด (`dashboard/`) | `127.0.0.1:8501` |
 
 ---
 
@@ -98,6 +99,7 @@ docker compose exec airflow airflow dags trigger disease_raw_to_lake
 - Airflow UI: http://localhost:8080 (user `airflow` / `airflow-local-only`)
 - SeaweedFS filer: http://localhost:8888 (bucket `disease-surveillance`)
 - Warehouse: `localhost:5433` database `surveillance_dw` (user `dw_user` / `warehouse-local-only`)
+- **Dashboard บนเว็บ: http://localhost:8501** (ข้อมูลสดจาก warehouse ไม่ต้องใช้ Power BI)
 
 รันเฉพาะ Spark + โหลด warehouse ใหม่ โดยไม่ land raw ซ้ำ:
 
@@ -201,7 +203,7 @@ s3://disease-surveillance/
 | ปี | สถานะ | แหล่งข้อมูล |
 |---|---|---|
 | 2569 | ✅ `population_summary_2569.csv` 50 เขต รวม 5,408,167 คน | สำนักงานปกครองและทะเบียน กทม. ข้อมูล ณ มิ.ย. 2569 (data.bangkok.go.th) |
-| 2568 | ⏳ ยังไม่มีไฟล์ทางการ Spark ใช้ปี 2569 แทน และ DQ ติดป้าย `population_years_filled_from_latest` | ระบบสถิติของกรมการปกครองไม่อนุญาตให้ดึงข้อมูลอัตโนมัติ |
+| 2568 | ✅ `population_summary_2568.csv` 50 เขต รวม 5,455,020 คน | กรมการปกครอง ข้อมูล ณ **31 ธ.ค. 2567** (data.go.th `dopa-star`, `stat_67.zip`) |
 
 แหล่งที่มา วันที่อ้างอิง และชื่อเขตที่แก้ไข บันทึกไว้ใน [`data/raw/disease/reference/SOURCES.md`](data/raw/disease/reference/SOURCES.md)
 ถ้าจะเพิ่มหรือแทนที่ไฟล์ (เช่น ปี 2568 จาก stat.bora.dopa.go.th) ให้ใช้:
@@ -286,7 +288,7 @@ docker compose exec airflow bash -c "cd /opt/airflow/project && python -m pytest
 - **ช่วงเวลาไม่ครบปี**: ปี 2568 เริ่ม มิ.ย. 2025 จึงห้ามเทียบยอดรวมทั้งปี 2568 กับ 2569 ตรง ๆ ให้เทียบรายเดือนที่ตรงกัน
 - **ไข้เลือดออก** ปี 2569 รวม DF + DHF + DSS (ไข้เลือดออกรวม) เพื่อให้เทียบกับปี 2568 ได้
 - **Incidence rate** แสดงเฉพาะเมื่อมีข้อมูลประชากรครบ 50 เขต และไม่คำนวณแยกตามอายุ/เพศ (ไม่มีประชากรแยกอายุ/เพศ)
-- **ตัวหารคือประชากรตามทะเบียนราษฎร** เขตชั้นในที่มีประชากรแฝงมาก (เช่น วัฒนา ห้วยขวาง ราชเทวี) อาจมีอัตราสูงเกินจริง และปี 2568 ใช้ประชากร มิ.ย. 2569 แทน
+- **ตัวหารคือประชากรตามทะเบียนราษฎร** เขตชั้นในที่มีประชากรแฝงมาก (เช่น วัฒนา ห้วยขวาง ราชเทวี) อาจมีอัตราสูงเกินจริง (ตัวหารปี 2568 = ณ 31 ธ.ค. 2567, ปี 2569 = ณ มิ.ย. 2569)
 - **ชื่อโรคต่างกันระหว่างปี** เช่น `อุจจาระร่วง` (2568) กับ `โรคอุจจาระร่วงเฉียบพลัน` (2569) ถูกรวมเป็น `อุจจาระร่วงเฉียบพลัน` ใน Spark โดยไม่แก้ Raw
 
 ---
@@ -322,7 +324,7 @@ Raw Data ต้องคงค่าตามต้นทาง ห้ามเ�
 | Spark อ่าน/เขียนผ่าน Data Lake + DQ | ✅ ใช้งานได้ |
 | PostgreSQL Warehouse + views | ✅ ใช้งานได้ |
 | Unit tests | ✅ 57 tests |
-| ข้อมูลประชากร 50 เขต (incidence rate) | ✅ ปี 2569 (มิ.ย. 2569) / ⏳ ปี 2568 ใช้ปี 2569 แทนจนกว่าจะได้ไฟล์ทางการ |
+| ข้อมูลประชากร 50 เขต (incidence rate) | ✅ ปี 2568 (31 ธ.ค. 2567, กรมการปกครอง) และปี 2569 (มิ.ย. 2569, สำนักงานปกครองและทะเบียน กทม.) |
 | ข้อมูลเต็ม (473,529 records, มิ.ย. 2025 – ก.ย. 2026) | ✅ รันผ่านทั้ง pipeline |
 | ไฟล์ Excel สำหรับ Power BI | ✅ `spark/export_powerbi.py` |
 | รายงาน Power BI | ✅ `powerbi/DiseaseSurveillance.pbip` (Desktop, 5 หน้า) และคู่มือสำหรับ Power BI บนเว็บ |

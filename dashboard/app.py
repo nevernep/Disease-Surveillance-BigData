@@ -17,35 +17,35 @@ import psycopg2
 
 INDEX = Path(__file__).resolve().parent / "index.html"
 
-# One round trip: every aggregate the page needs, built in SQL from the mart.
+# One round trip. The star schema itself (dims + the aggregated fact, ~50k
+# rows of counts, no personal data) so the page can cross-filter any view —
+# year, disease, district — and every chart sums the same rows.
 DATA_SQL = """
 SELECT json_build_object(
-  'monthly', (
+  'fact', (
+    SELECT json_agg(json_build_array(
+      date_key, district_key, disease_key, age_group_key, sex, total_cases))
+    FROM mart.fact_disease_cases),
+  'dim_date', (
     SELECT json_agg(json_build_object(
-      'm', to_char(month_start, 'YYYY-MM'), 'label', month_label, 'y', year_be,
-      'd', disease_name, 'c', total_cases) ORDER BY month_start, disease_name)
-    FROM mart.vw_monthly_trend),
-  'district', (
-    SELECT json_agg(json_build_object(
-      'y', d.year_be, 'dist', dst.district_name, 'd', dse.disease_name, 'c', s.cases))
-    FROM (
-      SELECT dd.year_be, f.district_key, f.disease_key, SUM(f.total_cases) AS cases
-      FROM mart.fact_disease_cases AS f
-      JOIN mart.dim_date AS dd ON dd.date_key = f.date_key
-      GROUP BY 1, 2, 3
-    ) AS s
-    JOIN (SELECT DISTINCT year_be FROM mart.dim_date) AS d ON d.year_be = s.year_be
-    JOIN mart.dim_district AS dst ON dst.district_key = s.district_key
-    JOIN mart.dim_disease AS dse ON dse.disease_key = s.disease_key),
+      'k', date_key, 'm', to_char(month_start, 'YYYY-MM'), 'label', month_label, 'y', year_be)
+      ORDER BY date_key)
+    FROM mart.dim_date),
+  'dim_district', (
+    SELECT json_agg(json_build_object('k', district_key, 'name', district_name) ORDER BY district_key)
+    FROM mart.dim_district WHERE is_bangkok_district),
+  'dim_disease', (
+    SELECT json_agg(json_build_object('k', disease_key, 'name', disease_name) ORDER BY disease_key)
+    FROM mart.dim_disease),
+  'dim_age', (
+    SELECT json_agg(json_build_object('k', age_group_key, 'label', age_group) ORDER BY age_group_key)
+    FROM mart.dim_age_group),
+  'dim_sex', (
+    SELECT json_agg(json_build_object('k', sex, 'label', sex_label) ORDER BY sex)
+    FROM mart.dim_sex),
   'population', (
-    SELECT json_agg(json_build_object('y', p.year_be, 'dist', dst.district_name, 'p', p.population))
-    FROM mart.fact_population AS p
-    JOIN mart.dim_district AS dst ON dst.district_key = p.district_key),
-  'demo', (
-    SELECT json_agg(json_build_object(
-      'y', year_be, 'd', disease_name, 'ak', age_group_key, 'a', age_group,
-      's', sex_label, 'c', total_cases))
-    FROM mart.vw_demographics),
+    SELECT json_agg(json_build_object('y', year_be, 'k', district_key, 'p', population))
+    FROM mart.fact_population),
   'period', (
     SELECT json_agg(json_build_object('y', year_be, 'months', months_covered, 'label', period_label))
     FROM mart.vw_year_period),
@@ -80,7 +80,7 @@ def fetch_data() -> bytes:
             payload = cursor.fetchone()[0]
     finally:
         connection.close()
-    if not payload or not payload.get("monthly"):
+    if not payload or not payload.get("fact"):
         raise LookupError("warehouse is empty: run the pipeline (spark_processing DAG) first")
     return json.dumps(payload, ensure_ascii=False).encode("utf-8")
 
